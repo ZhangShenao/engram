@@ -1,67 +1,78 @@
 # Engram
 
-**Engram** is an overseas, Character.AI-style **text-only** roleplay chat for the web. Create character cards, stream in-character replies, inspect the exact context sent to the model each turn, and manage typed memories locally. Web only — no native app.
+Engram is an overseas, text-only roleplay chat for the web. You write character cards, talk in a dark full-height shell, and open the exact context and memories that shaped each reply.
 
-## Requirements
+The **harness** is Engram’s own roleplay orchestrator. It builds the prompt, keeps the persona and token budget intact, retrieves memory, calls the model, and writes memories plus the rolling summary. Character cards, conversations, and memories are separate services. The browser talks only to the gateway.
 
-- Node.js 20+
-- npm
+Web only. No voice, image generation, accounts, or social feed.
 
-## Setup
+## Service map
+
+| Service | Port | Owns |
+|---------|------|------|
+| web | 18415 | Next.js UI |
+| gateway | 18410 | Public API, seed bootstrap, request log |
+| character | 18411 | Character cards (`data/character.db`) |
+| conversation | 18412 | Sessions, messages, rolling summary (`data/conversation.db`) |
+| memory | 18413 | Extract, rank, slot supersede, edit/delete (`data/memory.db`) |
+| harness | 18414 | Context assembly, prompts, model call, inspector snapshots (`data/harness.db`) |
+
+Lyra, Zero, and Mara are seeded on an empty character database, with their greetings stored as the first assistant message.
+
+## Run locally
+
+Requirements: Python 3.12, Node.js 20+, npm.
 
 ```bash
-npm install
+./scripts/dev.sh
 ```
 
-## Run
+Open [http://127.0.0.1:18415](http://127.0.0.1:18415).
+
+The script creates `.venv`, installs Python dependencies, installs the web app if needed, and starts all five services plus Next.js. It does not use the old single-process Node server.
+
+## Run with Docker
 
 ```bash
-npm run dev
+docker compose up --build
 ```
 
-Open [http://127.0.0.1:43123](http://127.0.0.1:43123).
+The web app is published on port 18415. SQLite files live in the `engram-data` volume.
 
-Data persists in `data/roleplay.db` (SQLite). Three example characters are seeded on first launch.
+## Environment
 
-## Environment (LLM)
+Copy `.env.example` if you want a file. `scripts/dev.sh` and Compose also work with variables exported in the shell.
 
-Without credentials, Engram uses a **scripted streaming provider** so chat, memory extraction, and the context inspector still work end to end.
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OPENROUTER_API_KEY` | empty | Empty uses the scripted streaming provider and the deterministic memory extractor |
+| `OPENROUTER_MODEL` | `anthropic/claude-sonnet-5` | OpenRouter model id. This slug is on the public model list |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Chat Completions base |
+| `CHARACTER_URL` | `http://127.0.0.1:18411` | Internal |
+| `CONVERSATION_URL` | `http://127.0.0.1:18412` | Internal |
+| `MEMORY_URL` | `http://127.0.0.1:18413` | Internal |
+| `HARNESS_URL` | `http://127.0.0.1:18414` | Internal |
+| `GATEWAY_URL` | `http://127.0.0.1:18410` | Used by the Next.js proxy |
+| `WEB_ORIGIN` | `http://127.0.0.1:18415` | Gateway CORS |
+| `SQLITE_PATH` | per service under `data/` | Override the SQLite file |
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `LLM_API_KEY` | API key for chat + LLM memory extraction | _(empty → scripted provider)_ |
-| `LLM_BASE_URL` | OpenAI-compatible chat completions base URL | `https://api.openai.com/v1` |
-| `LLM_MODEL` | Model name | `gpt-4o-mini` |
-
-Example `.env.local`:
-
-```env
-LLM_API_KEY=sk-...
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
-```
+With a key, chat and memory extraction call OpenRouter and send `HTTP-Referer: https://github.com/ZhangShenao/engram` plus `X-Title: Engram`. Without a key, the UI, memories, and context inspector still run.
 
 ## Tests
 
 ```bash
-npm test
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest
 ```
 
-Unit tests cover the prompt builder, memory rank/supersede, and context assembler (trim order, persona preservation, evicted turns).
+Tests cover trim order, persona retention, evicted turns, memory rank, slot supersede, and prompt section order. They do not need a running server or an API key.
 
-## Architecture
+## Phase 1 limits
 
-Product architecture (Chinese, for PO review): [docs/architecture.md](docs/architecture.md).
+Included: character cards, streaming chat, regenerate, continue, typed memories (`fact`, `relationship`, `promise`, `boundary`, `plot`), slot supersede for `user_name` only, rolling summary of evicted turns, and a context inspector.
 
-## Phase 1 scope (limits)
+Not included: voice, image generation, auth, social feed, native apps, embeddings, group chat, or Kubernetes.
 
-Included: character CRUD, streaming chat, context inspector, memory panel, local SQLite, pluggable LLM + memory extractors.
-
-**Not** in phase 1: voice, image generation, user auth, social feed, native mobile apps, or multi-user cloud sync.
-
-## Demo without an API key
-
-1. Open any seeded character (Lyra, Zero, or Mara).
-2. Send a message — replies stream via the scripted provider.
-3. Use the **Context** tab to see persona, memories, summary, recent turns, token estimates, and trim log.
-4. Say `My name is Alex`, send again — check **Memory** for a `fact`; edit or delete it and confirm it no longer appears in Context on the next turn.
+Architecture (Chinese): [docs/architecture.md](docs/architecture.md).

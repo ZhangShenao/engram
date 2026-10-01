@@ -1,0 +1,120 @@
+services:
+  character:
+    build: .
+    command: ["python", "-m", "uvicorn", "character_service.main:app", "--host", "0.0.0.0", "--port", "18411"]
+    environment:
+      SQLITE_PATH: /data/character.db
+    volumes:
+      - engram-data:/data
+    ports:
+      - "18411:18411"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18411/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  conversation:
+    build: .
+    command: ["python", "-m", "uvicorn", "conversation_service.main:app", "--host", "0.0.0.0", "--port", "18412"]
+    environment:
+      SQLITE_PATH: /data/conversation.db
+    volumes:
+      - engram-data:/data
+    ports:
+      - "18412:18412"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18412/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  memory:
+    build: .
+    command: ["python", "-m", "uvicorn", "memory_service.main:app", "--host", "0.0.0.0", "--port", "18413"]
+    environment:
+      SQLITE_PATH: /data/memory.db
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+    volumes:
+      - engram-data:/data
+    ports:
+      - "18413:18413"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18413/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  harness:
+    build: .
+    command: ["python", "-m", "uvicorn", "harness_service.main:app", "--host", "0.0.0.0", "--port", "18414"]
+    environment:
+      SQLITE_PATH: /data/harness.db
+      CHARACTER_URL: http://character:18411
+      CONVERSATION_URL: http://conversation:18412
+      MEMORY_URL: http://memory:18413
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+    volumes:
+      - engram-data:/data
+    ports:
+      - "18414:18414"
+    depends_on:
+      character:
+        condition: service_healthy
+      conversation:
+        condition: service_healthy
+      memory:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18414/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  gateway:
+    build: .
+    command: ["python", "-m", "uvicorn", "gateway_service.main:app", "--host", "0.0.0.0", "--port", "18410"]
+    environment:
+      SQLITE_PATH: /data/gateway.db
+      CHARACTER_URL: http://character:18411
+      CONVERSATION_URL: http://conversation:18412
+      MEMORY_URL: http://memory:18413
+      HARNESS_URL: http://harness:18414
+      WEB_ORIGIN: http://localhost:18415,http://127.0.0.1:18415
+    volumes:
+      - engram-data:/data
+    ports:
+      - "18410:18410"
+    depends_on:
+      character:
+        condition: service_healthy
+      conversation:
+        condition: service_healthy
+      memory:
+        condition: service_healthy
+      harness:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18410/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    environment:
+      GATEWAY_URL: http://gateway:18410
+    ports:
+      - "18415:18415"
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+volumes:
+  engram-data:
