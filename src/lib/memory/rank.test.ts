@@ -9,6 +9,7 @@ function mem(partial: Partial<MemoryRecord> & { id: string }): MemoryRecord {
     type: "fact",
     text: "default",
     salience: 0.5,
+    slot: null,
     sourceTurnId: null,
     supersededById: null,
     deletedAt: null,

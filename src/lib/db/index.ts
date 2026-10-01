@@ -81,6 +81,11 @@ function migrate(database: Database.Database) {
       updated_at TEXT NOT NULL
     );
   `);
+  try {
+    database.exec(`ALTER TABLE memories ADD COLUMN slot TEXT`);
+  } catch {
+    /* column exists */
+  }
 }
 
 export function listCharacters(): CharacterCard[] {
@@ -248,8 +253,8 @@ export function insertMemory(
   const now = new Date().toISOString();
   getDb()
     .prepare(
-      `INSERT INTO memories (id, character_id, user_id, type, text, salience, source_turn_id, superseded_by_id, deleted_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO memories (id, character_id, user_id, type, text, salience, slot, source_turn_id, superseded_by_id, deleted_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       data.id,
@@ -258,6 +263,7 @@ export function insertMemory(
       data.type,
       data.text,
       data.salience,
+      data.slot,
       data.sourceTurnId,
       data.supersededById,
       data.deletedAt,

@@ -1,4 +1,5 @@
-import type { MemoryCandidate } from "./types";
+import type { MemoryCandidate, MemoryType } from "./types";
+import { MEMORY_SLOTS } from "./slots";
 
 export interface ExtractorInput {
   userMessage: string;
@@ -7,12 +8,12 @@ export interface ExtractorInput {
 }
 
 export interface MemoryExtractor {
-  extract(input: ExtractorInput): MemoryCandidate[];
+  extract(input: ExtractorInput): Promise<MemoryCandidate[]>;
 }
 
 /** Deterministic extractor for demo / no API key */
 export class DeterministicMemoryExtractor implements MemoryExtractor {
-  extract(input: ExtractorInput): MemoryCandidate[] {
+  async extract(input: ExtractorInput): Promise<MemoryCandidate[]> {
     const candidates: MemoryCandidate[] = [];
     const user = input.userMessage.trim();
     const assistant = input.assistantMessage.trim();
@@ -26,6 +27,7 @@ export class DeterministicMemoryExtractor implements MemoryExtractor {
         type: "fact",
         text: `The user's name is ${nameMatch[1].trim()}.`,
         salience: 0.9,
+        slot: MEMORY_SLOTS.USER_NAME,
       });
     }
 

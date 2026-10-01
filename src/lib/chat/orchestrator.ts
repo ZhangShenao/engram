@@ -11,6 +11,7 @@ import {
 import { createLLMProvider } from "@/lib/llm/factory";
 import { memoryService } from "@/lib/memory/service";
 import { LOCAL_USER_ID } from "@/lib/db/schema";
+import { formatEvictedTurnsForSummary } from "@/lib/chat/summary";
 
 export interface ChatResult {
   assistantMessageId: string;
@@ -67,14 +68,10 @@ export async function runChatTurn(params: {
     turnId: assistantMessageId,
   });
 
-  if (inspector.trimLog.length > 0) {
-    const dropped = inspector.trimLog.join("; ");
+  if (inspector.evictedTurns.length > 0) {
     appendToSummary(
       sessionId,
-      `Earlier: ${history
-        .slice(0, 2)
-        .map((m) => `${m.role}: ${m.content.slice(0, 120)}`)
-        .join(" | ")} (${dropped})`
+      formatEvictedTurnsForSummary(inspector.evictedTurns)
     );
   }
 

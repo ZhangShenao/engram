@@ -42,6 +42,7 @@ export interface DbMemoryRow {
   type: string;
   text: string;
   salience: number;
+  slot: string | null;
   source_turn_id: string | null;
   superseded_by_id: string | null;
   deleted_at: string | null;
@@ -57,6 +58,7 @@ export function rowToMemory(row: DbMemoryRow): MemoryRecord {
     type: row.type as MemoryType,
     text: row.text,
     salience: row.salience,
+    slot: row.slot ?? null,
     sourceTurnId: row.source_turn_id,
     supersededById: row.superseded_by_id,
     deletedAt: row.deleted_at,

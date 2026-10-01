@@ -15,6 +15,8 @@ export interface MemoryRecord {
   type: MemoryType;
   text: string;
   salience: number;
+  /** Canonical slot for single-value facts (e.g. user_name). */
+  slot: string | null;
   sourceTurnId: string | null;
   supersededById: string | null;
   deletedAt: string | null;
@@ -26,5 +28,6 @@ export interface MemoryCandidate {
   type: MemoryType;
   text: string;
   salience: number;
+  slot?: string | null;
   supersedesMemoryId?: string;
 }

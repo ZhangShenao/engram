@@ -1,12 +1,14 @@
 import { v4 as uuidv4 } from "uuid";
 import { insertMemory, listMemories, markMemorySuperseded } from "@/lib/db";
-import type { MemoryExtractor } from "./extractor";
-import { DeterministicMemoryExtractor } from "./extractor";
+import { createMemoryExtractor } from "./factory";
+import { inferMemorySlot } from "./slots";
 import { findSupersededMemory } from "./supersede";
 import type { MemoryRecord } from "./types";
 
 export class MemoryService {
-  constructor(private extractor: MemoryExtractor = new DeterministicMemoryExtractor()) {}
+  constructor(
+    private getExtractor = createMemoryExtractor
+  ) {}
 
   async processAssistantTurn(params: {
     characterId: string;
@@ -15,7 +17,8 @@ export class MemoryService {
     assistantMessage: string;
     turnId: string;
   }): Promise<MemoryRecord[]> {
-    const candidates = this.extractor.extract({
+    const extractor = this.getExtractor();
+    const candidates = await extractor.extract({
       userMessage: params.userMessage,
       assistantMessage: params.assistantMessage,
       turnId: params.turnId,
@@ -26,6 +29,8 @@ export class MemoryService {
 
     for (const candidate of candidates) {
       const id = uuidv4();
+      const slot =
+        candidate.slot ?? inferMemorySlot(candidate.type, candidate.text);
       const superseded = findSupersededMemory(candidate, existing);
       const record = insertMemory({
         id,
@@ -34,6 +39,7 @@ export class MemoryService {
         type: candidate.type,
         text: candidate.text,
         salience: candidate.salience,
+        slot,
         sourceTurnId: params.turnId,
         supersededById: null,
         deletedAt: null,

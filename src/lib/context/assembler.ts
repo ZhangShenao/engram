@@ -39,6 +39,8 @@ export interface AssembledContext {
   messages: { role: "system" | "user" | "assistant"; content: string }[];
   layers: ContextLayer[];
   trimLog: string[];
+  /** Turns removed from the verbatim window this assembly (for rolling summary). */
+  evictedTurns: VerbatimTurn[];
   totalTokens: number;
   budget: number;
 }
@@ -103,6 +105,7 @@ export function assembleContext(input: AssembleInput): AssembledContext {
 
   let pairs = turnsToPairs([...input.verbatimTurns]);
   const trimmedTurnIds: string[] = [];
+  const evictedTurns: VerbatimTurn[] = [];
 
   const buildLayers = () => {
     const anchors = selectExampleAnchors(
@@ -185,6 +188,7 @@ export function assembleContext(input: AssembleInput): AssembledContext {
     const removed = pairs.shift();
     if (removed) {
       trimmedTurnIds.push(...removed.map((t) => t.id));
+      evictedTurns.push(...removed);
       trimLog.push("Trimmed oldest verbatim turn pair.");
     }
     built = buildLayers();
@@ -246,6 +250,7 @@ export function assembleContext(input: AssembleInput): AssembledContext {
     messages,
     layers: built.layers,
     trimLog,
+    evictedTurns,
     totalTokens: built.total,
     budget,
   };

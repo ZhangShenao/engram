@@ -53,6 +53,26 @@ describe("context assembler", () => {
       "Never OOC."
     );
     expect(result.trimLog.some((t) => t.includes("oldest"))).toBe(true);
+    expect(result.evictedTurns.length).toBeGreaterThan(0);
+    expect(result.evictedTurns[0].role).toBeDefined();
+  });
+
+  it("lists evicted turns in order when trimming verbatim history", () => {
+    const turns = makeTurns(8);
+    const firstPairId = turns[0].id;
+    const result = assembleContext({
+      character,
+      memories: [],
+      summary: "",
+      verbatimTurns: turns,
+      latestUserMessage: "Latest?",
+      budget: 400,
+    });
+    const evictedIds = result.evictedTurns.map((t) => t.id);
+    expect(evictedIds).toContain(firstPairId);
+    const recentContent =
+      result.layers.find((l) => l.id === "recent")?.content ?? "";
+    expect(recentContent).not.toContain(turns[0].content);
   });
 
   it("records trim log on budget overflow", () => {
@@ -63,6 +83,7 @@ describe("context assembler", () => {
       type: "fact",
       text: `Memory fact number ${i} with extra words`,
       salience: 0.5,
+      slot: null,
       sourceTurnId: null,
       supersededById: null,
       deletedAt: null,

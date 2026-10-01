@@ -12,6 +12,7 @@ import { LOCAL_USER_ID } from "@/lib/db/schema";
 import { assembleContext } from "@/lib/context/assembler";
 import { createLLMProvider } from "@/lib/llm/factory";
 import { memoryService } from "@/lib/memory/service";
+import { formatEvictedTurnsForSummary } from "@/lib/chat/summary";
 
 export const runtime = "nodejs";
 
@@ -77,8 +78,11 @@ export async function POST(
           turnId: assistantMessageId,
         });
 
-        if (inspector.trimLog.length > 0) {
-          appendToSummary(sessionId, inspector.trimLog.join("; "));
+        if (inspector.evictedTurns.length > 0) {
+          appendToSummary(
+            sessionId,
+            formatEvictedTurnsForSummary(inspector.evictedTurns)
+          );
         }
 
         send({
