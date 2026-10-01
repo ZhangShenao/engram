@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Roleplay Studio",
-  description: "Character-first text roleplay with memory and context transparency",
+  title: "Engram",
+  description: "Text roleplay with memory and transparent context — web only",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

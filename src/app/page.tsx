@@ -42,7 +42,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-gradient-to-b from-violet-50/80 to-background dark:from-violet-950/20">
       <header className="max-w-5xl mx-auto px-4 py-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Roleplay Studio</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Engram</h1>
           <p className="text-muted-foreground mt-1 max-w-lg">
             Character-first text roleplay with transparent context layers and persistent memories — no feed, no voice, just scene.
           </p>
