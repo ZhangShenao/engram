@@ -14,8 +14,8 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/health` | `{status, service}` |
-| GET/POST | `/api/characters` | 列表 / 创建（创建后写 greeting） |
-| GET/PUT/DELETE | `/api/characters/{id}` | 读、改、删。删除时一并清会话和记忆 |
+| GET/POST | `/api/characters` | 列表 / 创建。greeting 不是 2xx 时失败，并删掉刚创建的角色 |
+| GET/PUT/DELETE | `/api/characters/{id}` | 读、改、删。记忆或会话清理返回 4xx/5xx 时不删角色 |
 | GET | `/api/chats` | 最近会话，带角色名 |
 | GET | `/api/chats/{characterId}` | 会话、消息、摘要、角色卡 |
 | POST | `/api/chats/{characterId}/stream` | 新一轮，SSE |

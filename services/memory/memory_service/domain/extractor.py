@@ -20,7 +20,7 @@ from engram_contracts.constants import (
 )
 from engram_contracts.models import MEMORY_TYPES, MemoryCandidate, MemoryType
 
-from memory_service.domain.slots import MEMORY_SLOTS
+from memory_service.domain.slots import MEMORY_SLOTS, normalize_slot
 
 
 class DeterministicMemoryExtractor:
@@ -114,12 +114,13 @@ def _parse_candidates(raw: str) -> list[MemoryCandidate]:
             salience_value = float(salience)
         except (TypeError, ValueError):
             salience_value = 0.6
+        text_value = str(text).strip()
         candidates.append(
             MemoryCandidate(
                 type=memory_type,  # type: ignore[arg-type]
-                text=str(text).strip(),
+                text=text_value,
                 salience=min(1.0, max(0.0, salience_value)),
-                slot=item.get("slot"),
+                slot=normalize_slot(item.get("slot"), memory_type, text_value),
                 supersedesMemoryId=item.get("supersedesMemoryId"),
             )
         )

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import psycopg
 from dotenv import load_dotenv
+from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
 
 from conversation_service.timeutil import now_iso
@@ -78,23 +79,35 @@ def _message(row: dict) -> dict:
     }
 
 
+def _find_session(conn: psycopg.Connection, character_id: str, user_id: str) -> str | None:
+    existing = conn.execute(
+        "SELECT id FROM chat_sessions WHERE character_id = %s AND user_id = %s",
+        (character_id, user_id),
+    ).fetchone()
+    return existing["id"] if existing else None
+
+
 def ensure_session(character_id: str, user_id: str) -> tuple[str, bool]:
     with connect() as conn:
-        existing = conn.execute(
-            "SELECT id FROM chat_sessions WHERE character_id = %s AND user_id = %s",
-            (character_id, user_id),
-        ).fetchone()
-        if existing:
-            return existing["id"], False
+        existing_id = _find_session(conn, character_id, user_id)
+        if existing_id:
+            return existing_id, False
         session_id = str(uuid.uuid4())
         stamp = now_iso()
-        conn.execute(
-            """
-            INSERT INTO chat_sessions (id, character_id, user_id, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (session_id, character_id, user_id, stamp, stamp),
-        )
+        try:
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (id, character_id, user_id, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (session_id, character_id, user_id, stamp, stamp),
+            )
+        except UniqueViolation:
+            conn.rollback()
+            existing_id = _find_session(conn, character_id, user_id)
+            if existing_id is None:
+                raise
+            return existing_id, False
         return session_id, True
 
 
@@ -126,6 +139,37 @@ def add_message(session_id: str, role: str, content: str) -> dict:
             (stamp, session_id),
         )
     return {"id": message_id, "role": role, "content": content, "createdAt": stamp}
+
+
+def replace_message(session_id: str, message_id: str, role: str, content: str) -> dict | None:
+    """Insert the replacement and delete the old message in one transaction."""
+    new_id = str(uuid.uuid4())
+    stamp = now_iso()
+    with connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM messages WHERE id = %s AND session_id = %s",
+            (message_id, session_id),
+        ).fetchone()
+        if not existing:
+            return None
+        conn.execute(
+            """
+            INSERT INTO messages (id, session_id, role, content, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (new_id, session_id, role, content, stamp),
+        )
+        deleted = conn.execute(
+            "DELETE FROM messages WHERE id = %s AND session_id = %s",
+            (message_id, session_id),
+        )
+        if deleted.rowcount != 1:
+            raise RuntimeError("replaced message disappeared before it could be swapped")
+        conn.execute(
+            "UPDATE chat_sessions SET updated_at = %s WHERE id = %s",
+            (stamp, session_id),
+        )
+    return {"id": new_id, "role": role, "content": content, "createdAt": stamp}
 
 
 def delete_message(session_id: str, message_id: str) -> bool:

@@ -152,7 +152,7 @@ async def create_character(payload: CharacterInput):
             return _proxy_error(response)
         body = response.json()
         character = body["character"]
-        await client.post(
+        greeting = await client.post(
             f"{conversation_url()}/internal/ensure-greeting",
             json={
                 "characterId": character["id"],
@@ -160,6 +160,11 @@ async def create_character(payload: CharacterInput):
                 "greeting": character.get("greeting") or "",
             },
         )
+        if greeting.status_code < 200 or greeting.status_code >= 300:
+            character_id = character.get("id")
+            if character_id:
+                await client.delete(f"{character_url()}/characters/{character_id}")
+            return _proxy_error(greeting)
     return body
 
 
@@ -187,8 +192,16 @@ async def update_character(character_id: str, payload: CharacterInput):
 @app.delete("/api/characters/{character_id}")
 async def delete_character(character_id: str):
     async with httpx.AsyncClient(timeout=30) as client:
-        await client.delete(f"{memory_url()}/memories", params={"characterId": character_id})
-        await client.delete(f"{conversation_url()}/sessions/by-character/{character_id}")
+        memory_response = await client.delete(
+            f"{memory_url()}/memories", params={"characterId": character_id}
+        )
+        if memory_response.status_code >= 400:
+            return _proxy_error(memory_response)
+        conversation_response = await client.delete(
+            f"{conversation_url()}/sessions/by-character/{character_id}"
+        )
+        if conversation_response.status_code >= 400:
+            return _proxy_error(conversation_response)
         response = await client.delete(f"{character_url()}/characters/{character_id}")
     if response.status_code >= 400:
         return _proxy_error(response)

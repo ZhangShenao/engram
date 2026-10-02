@@ -20,6 +20,7 @@ from memory_service.store import (
     init_db,
     rank_for_character,
     soft_delete,
+    soft_delete_by_source_turn,
     update_memory,
 )
 
@@ -41,6 +42,11 @@ class ExtractBody(BaseModel):
     user_message: str = Field(alias="userMessage")
     assistant_message: str = Field(alias="assistantMessage")
     turn_id: str = Field(alias="turnId")
+
+
+class DiscardTurn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    source_turn_id: str = Field(alias="sourceTurnId")
 
 
 class MemoryPatch(BaseModel):
@@ -67,6 +73,12 @@ def get_memories(characterId: str, userId: str = "local"):
 def post_rank(body: RankBody):
     ranked = rank_for_character(body.character_id, body.user_id, body.query)
     return {"memories": [dump_memory(item) for item in ranked]}
+
+
+@app.post("/memories/discard-turn")
+def post_discard_turn(body: DiscardTurn):
+    discarded = soft_delete_by_source_turn(body.source_turn_id)
+    return {"ok": True, "discarded": discarded}
 
 
 @app.post("/memories/extract")

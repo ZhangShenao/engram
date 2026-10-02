@@ -64,7 +64,8 @@ Phase 1 的行为（人设不可被裁掉、槽位只取代 `user_name`、滚动
 - `POST /sessions/ensure`：按 `(character_id, user_id)` 取或建会话
 - `GET /sessions/by-character/{characterId}`
 - `GET|POST /sessions/{id}/messages`
-- `DELETE /sessions/{id}/messages/last-assistant`：仅当存在用户消息时删除最后一条助手消息（供 regenerate）
+- `POST /sessions/{id}/messages/{messageId}/replace`：同一事务里写入新消息并删除旧消息（regenerate）
+- `DELETE /sessions/{id}/messages/{messageId}`
 - `GET /sessions/{id}/summary`、`POST /sessions/{id}/summary/append`
 - `GET /sessions/recent`
 - `POST /internal/ensure-greeting`：会话尚无消息时写入角色 greeting
@@ -76,7 +77,8 @@ Phase 1 的行为（人设不可被裁掉、槽位只取代 `user_name`、滚动
 
 - `GET /memories`：活跃记忆（无 `deleted_at`、无 `superseded_by_id`）
 - `POST /memories/rank`：按 salience、新近度、词面相关度排序
-- `POST /memories/extract`：从一轮对白提取候选，解析槽位，必要时取代，再插入
+- `POST /memories/extract`：从一轮对白提取候选，解析槽位，必要时取代，再插入。模型给出的 `slot` 只有 `user_name` 会保留，其它字符串丢掉后再按类型和正文推断
+- `POST /memories/discard-turn`：按 `sourceTurnId` 软删某一轮产生的记忆
 - `PATCH /memories/{id}`、`DELETE /memories/{id}`（软删）
 - `DELETE /memories`：按角色清空（删角色时）
 
@@ -95,7 +97,7 @@ Prompt 与裁剪代码：
 - `services/harness/harness_service/llm/`（OpenRouter 与脚本化 Provider）
 - `services/harness/harness_service/orchestrator.py`
 
-排序函数的实现位于 `services/memory/memory_service/domain/rank.py`。Harness 在组装时调用同一实现（保证单测与线上一致），检索到的记忆行本身来自 Memory 服务的 HTTP 接口。
+排序只在 Memory 的 `POST /memories/rank`（`domain/rank.py`）里做。Harness 按该响应的顺序做 token 预算装箱，不再导入 Memory 的排序实现。
 
 ---
 
@@ -124,7 +126,7 @@ Web  POST /gateway/api/chats/{characterId}/stream  { message }
      13. SSE done
 ```
 
-`regenerate`：不新增 user 消息。必须已有 user 消息，且最后一条是 assistant。verbatim 不含最后一条 user，也不含待替换的 assistant。新回复完整生成之后才删除旧 assistant；生成失败时旧回复还在。
+`regenerate`：不新增 user 消息。最后一条必须是 assistant。若它的前一条也是 assistant（续写），prompt 保留更早的回复，只替换最后一条，发给模型的最新 user 行是续写指令。否则 verbatim 截到最后一条 user 之前，待替换的 assistant 不进入 prompt。新回复和删除旧回复在 Conversation 的一次事务里完成；事务失败时旧回复还在。替换成功后、提取新记忆之前，软删 `source_turn_id` 等于旧回复的记忆。
 
 `continue`：不落库续写指令，也不把该指令交给记忆提取。verbatim 为全部历史；发给模型的最后一条 user 是续写指令（不计入可裁剪窗口）。排序 query 用上一条真实 user 文本。新的 assistant 消息另起一条。
 

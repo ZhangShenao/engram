@@ -36,6 +36,31 @@ async def _json(response: httpx.Response) -> dict:
     return response.json()
 
 
+def regeneration_context(history_all: list[dict]) -> tuple[list[dict], str, str, str]:
+    """Prompt history, latest line, rank query, and the assistant message to replace.
+
+    A continuation is an assistant message whose predecessor is also assistant.
+    Regenerating it keeps that earlier reply and only replaces the last message.
+    """
+    if not history_all or history_all[-1]["role"] != "assistant":
+        raise TurnError(400, "Nothing to regenerate yet.")
+    replace_message_id = history_all[-1]["id"]
+    previous = history_all[-2] if len(history_all) >= 2 else None
+    if previous is not None and previous["role"] == "assistant":
+        history = history_all[:-1]
+        users = [item for item in history if item["role"] == "user"]
+        rank_query = users[-1]["content"] if users else CONTINUE_INSTRUCTION
+        return history, CONTINUE_INSTRUCTION, rank_query, replace_message_id
+    users = [item for item in history_all if item["role"] == "user"]
+    if not users:
+        raise TurnError(400, "Send a message before regenerating.")
+    last_user = users[-1]
+    user_index = next(
+        index for index, item in enumerate(history_all) if item["id"] == last_user["id"]
+    )
+    return history_all[:user_index], last_user["content"], last_user["content"], replace_message_id
+
+
 async def stream_turn(character_id: str, user_id: str, mode: str, message: str):
     async with httpx.AsyncClient(timeout=60) as client:
         character_response = await client.get(f"{character_url()}/characters/{character_id}")
@@ -74,20 +99,9 @@ async def stream_turn(character_id: str, user_id: str, mode: str, message: str):
             latest = text
             rank_query = text
         elif mode == "regenerate":
-            history_all = await messages()
-            if not history_all or history_all[-1]["role"] != "assistant":
-                raise TurnError(400, "Nothing to regenerate yet.")
-            users = [item for item in history_all if item["role"] == "user"]
-            if not users:
-                raise TurnError(400, "Send a message before regenerating.")
-            last_user = users[-1]
-            user_index = next(
-                index for index, item in enumerate(history_all) if item["id"] == last_user["id"]
+            history, latest, rank_query, replace_message_id = regeneration_context(
+                await messages()
             )
-            history = history_all[:user_index]
-            latest = last_user["content"]
-            rank_query = latest
-            replace_message_id = history_all[-1]["id"]
         elif mode == "continue":
             history = await messages()
             if not any(item["role"] == "assistant" for item in history):
@@ -132,17 +146,28 @@ async def stream_turn(character_id: str, user_id: str, mode: str, message: str):
                 yield sse({"type": "error", "message": "The model returned an empty reply."})
                 return
             if replace_message_id:
-                deleted = await client.delete(
-                    f"{conversation_url()}/sessions/{session_id}/messages/{replace_message_id}"
+                saved = await _json(
+                    await client.post(
+                        f"{conversation_url()}/sessions/{session_id}/messages/{replace_message_id}/replace",
+                        json={"role": "assistant", "content": content},
+                    )
                 )
-                if deleted.status_code >= 400:
-                    raise TurnError(deleted.status_code, "Could not replace the previous reply.")
-            saved = await _json(
-                await client.post(
-                    f"{conversation_url()}/sessions/{session_id}/messages",
-                    json={"role": "assistant", "content": content},
+                discarded = await client.post(
+                    f"{memory_url()}/memories/discard-turn",
+                    json={"sourceTurnId": replace_message_id},
                 )
-            )
+                if discarded.status_code >= 400:
+                    raise TurnError(
+                        discarded.status_code,
+                        "Could not clear memories from the discarded reply.",
+                    )
+            else:
+                saved = await _json(
+                    await client.post(
+                        f"{conversation_url()}/sessions/{session_id}/messages",
+                        json={"role": "assistant", "content": content},
+                    )
+                )
             extract_user = "" if mode == "continue" else rank_query
             try:
                 await client.post(

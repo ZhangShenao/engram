@@ -21,6 +21,7 @@ from conversation_service.store import (
     init_db,
     list_messages,
     recent_sessions,
+    replace_message,
     session_exists,
 )
 
@@ -88,6 +89,20 @@ def post_message(session_id: str, body: NewMessage):
     if not body.content.strip():
         raise HTTPException(status_code=400, detail="Content is required")
     return {"message": add_message(session_id, body.role, body.content)}
+
+
+@app.post("/sessions/{session_id}/messages/{message_id}/replace", status_code=201)
+def post_replace_message(session_id: str, message_id: str, body: NewMessage):
+    if not session_exists(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    if body.role not in {"user", "assistant"}:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    if not body.content.strip():
+        raise HTTPException(status_code=400, detail="Content is required")
+    replaced = replace_message(session_id, message_id, body.role, body.content)
+    if replaced is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"message": replaced}
 
 
 @app.delete("/sessions/{session_id}/messages/{message_id}")

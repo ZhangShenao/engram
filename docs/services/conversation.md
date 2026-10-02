@@ -11,11 +11,14 @@
 | GET | `/sessions/by-character/{characterId}` | 取或建会话 |
 | GET | `/sessions/recent?userId=` | 按最后一条消息时间排序 |
 | GET/POST | `/sessions/{id}/messages` | 列表 / 追加。`role` 为 `user` 或 `assistant` |
-| DELETE | `/sessions/{id}/messages/{messageId}` | 删除一条（regenerate 成功后由 Harness 调用） |
+| POST | `/sessions/{id}/messages/{messageId}/replace` | 同一事务写入新消息并删除旧消息。插入失败时旧消息还在 |
+| DELETE | `/sessions/{id}/messages/{messageId}` | 删除一条 |
 | GET | `/sessions/{id}/summary` | `{summary}` |
 | POST | `/sessions/{id}/summary/append` | `{text}`。与旧摘要用换行拼接，保留末尾 4000 字符 |
 | DELETE | `/sessions/by-character/{characterId}` | 删除该角色的会话、消息、摘要 |
 | POST | `/internal/ensure-greeting` | 会话还没有消息时写入 greeting |
+
+`POST /sessions/ensure` 在 `(character_id, user_id)` 唯一约束冲突时重新读取已有会话，而不是返回 500。
 
 ## 数据
 

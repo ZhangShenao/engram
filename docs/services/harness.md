@@ -22,7 +22,7 @@ Engram 自己的角色扮演编排服务，不是第三方产品。它是唯一�
 | POST | `/turns/stream` | `{characterId, userId, mode, message}`。`mode` 为 `chat`、`regenerate`、`continue`。SSE：`inspector`、`chunk`、`done`、`error` |
 | GET | `/inspections/{characterId}?userId=` | 最近一次快照，没有则为 `{inspector: null}` |
 
-`regenerate` 在新回复生成完成之后才删掉旧 assistant。`continue` 不把续写指令写进会话或记忆。
+`regenerate` 在新回复生成完成之后，用 Conversation 的原子替换写入新回复并删掉旧 assistant。续写产生的最后一条 assistant 只替换自己，更早的 assistant 留在 prompt 里。替换成功后先按 `sourceTurnId` 软删旧记忆，再提取新记忆。替换失败时旧回复还在。记忆顺序来自 Memory 的 rank 响应，Harness 只按 token 预算装箱。`continue` 不把续写指令写进会话或记忆。
 
 ## 数据
 

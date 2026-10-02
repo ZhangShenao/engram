@@ -17,6 +17,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { deleteCharacter, getChat, getInspector, streamTurn } from "@/lib/api";
+import { transcriptAfterFailedStream } from "@/lib/transcript";
 import type { ChatMessage, Inspector } from "@/lib/types";
 
 export function ChatPanel({ characterId }: { characterId: string }) {
@@ -107,13 +108,12 @@ export function ChatPanel({ characterId }: { characterId: string }) {
       setStreaming(false);
     }
     if (failed) {
-      setMessages((current) =>
-        current.flatMap((message) => {
-          if (message.id !== "streaming") return [message];
-          if (!message.content) return [];
-          return [{ ...message, id: `unsaved-${Date.now()}` }];
-        })
-      );
+      try {
+        const chat = await getChat(characterId);
+        setMessages(transcriptAfterFailedStream(chat.messages));
+      } catch {
+        setMessages((current) => transcriptAfterFailedStream(current));
+      }
     }
     return !failed;
   };
@@ -137,8 +137,7 @@ export function ChatPanel({ characterId }: { characterId: string }) {
 
   const regenerate = async () => {
     if (streaming) return;
-    const previous = messages;
-    const ok = await runStream(`/gateway/api/chats/${characterId}/regenerate`, {}, (current) => {
+    await runStream(`/gateway/api/chats/${characterId}/regenerate`, {}, (current) => {
       const next = [...current];
       let index = -1;
       for (let cursor = next.length - 1; cursor >= 0; cursor -= 1) {
@@ -151,7 +150,6 @@ export function ChatPanel({ characterId }: { characterId: string }) {
       next[index] = { ...next[index], id: "streaming", content: "" };
       return next;
     });
-    if (!ok) setMessages(previous);
   };
 
   const continueScene = async () => {

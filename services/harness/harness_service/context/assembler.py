@@ -25,8 +25,8 @@ from harness_service.prompt.builder import (
     format_memories_block,
     format_summary_block,
 )
+from harness_service.context.pack import pack_memories_by_token_budget
 from harness_service.prompt.templates import PROMPT_SECTION_ORDER
-from memory_service.domain.rank import pack_memories_by_token_budget, rank_memories
 
 
 def turns_to_pairs(turns: list[VerbatimTurn]) -> list[list[VerbatimTurn]]:
@@ -68,10 +68,12 @@ def assemble_context(
     example_count = len(character.example_dialogues)
     summary_text = summary
     summary_trimmed = False
+    # Memory already ranked these via POST /memories/rank. rank_query is accepted
+    # so callers can keep passing that query; Harness does not rank again.
+    _ = rank_query
 
-    ranked = rank_memories(memories, rank_query if rank_query is not None else latest_user_message)
     packed_memories, dropped_memories = pack_memories_by_token_budget(
-        ranked,
+        list(memories),
         LAYER_BUDGET_HINTS["memoriesMax"],
         estimate_tokens,
     )

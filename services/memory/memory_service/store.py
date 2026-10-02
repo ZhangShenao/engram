@@ -11,7 +11,7 @@ from engram_contracts.models import MemoryRecord, MemoryType
 
 from memory_service.domain.extractor import create_extractor
 from memory_service.domain.rank import rank_memories
-from memory_service.domain.slots import infer_memory_slot
+from memory_service.domain.slots import normalize_slot
 from memory_service.domain.supersede import find_superseded_memory
 from memory_service.timeutil import now_iso
 
@@ -175,7 +175,7 @@ async def extract_and_store(
             text = candidate.text.strip()
             if not text:
                 continue
-            slot = candidate.slot or infer_memory_slot(candidate.type, text)
+            slot = normalize_slot(candidate.slot, candidate.type, text)
             prepared = candidate.model_copy(update={"text": text, "slot": slot})
             superseded = find_superseded_memory(prepared, existing)
             memory_id = str(uuid.uuid4())
@@ -228,6 +228,20 @@ def update_memory(
             (updated_text, updated_type, updated_salience, now_iso(), memory_id),
         )
     return get_memory(memory_id)
+
+
+def soft_delete_by_source_turn(source_turn_id: str) -> int:
+    stamp = now_iso()
+    with connect() as conn:
+        result = conn.execute(
+            """
+            UPDATE memories
+            SET deleted_at = %s, updated_at = %s
+            WHERE source_turn_id = %s AND deleted_at IS NULL
+            """,
+            (stamp, stamp, source_turn_id),
+        )
+        return result.rowcount
 
 
 def soft_delete(memory_id: str) -> bool:
