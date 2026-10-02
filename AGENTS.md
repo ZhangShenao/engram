@@ -55,8 +55,8 @@ Web: http://127.0.0.1:18415. Do not reuse ports 3000, 5173, 8080, or 43123.
 
 ## Git workflow
 
-1. Branch from `main`.
+1. Branch from `main`. Do not push commits straight to `main`. The ruleset blocks direct pushes, force pushes, and deletion, with no bypass.
 2. Open a pull request. The template asks for a summary, how to test, and a checklist.
-3. CI (`.github/workflows/ci.yml`) must pass. It runs on pull requests and on pushes to `main`, and it cancels superseded runs. No secrets are required.
+3. CI (`.github/workflows/ci.yml`) must pass. The required check name is `ci`. The branch must be up to date with `main`. The workflow cancels superseded runs and needs no secrets.
 4. Never commit `.env`.
-5. Merge only after CI is green.
+5. Merge only after `ci` is green.

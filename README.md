@@ -79,7 +79,7 @@ Tests cover trim order, persona retention, evicted turns, memory rank, slot supe
 
 Branch from `main` and open a pull request. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It cancels a run when a newer commit supersedes it. The job starts PostgreSQL 16, creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness` from [`scripts/init-postgres.sql`](scripts/init-postgres.sql), then runs `pytest` with those service `DATABASE_URL`s and an empty `OPENROUTER_API_KEY`. It then runs `npm ci` and `npm run build` in `web/`. No repository secrets are required.
 
-CI must pass before merge. Merge only after that check is green.
+`main` rejects direct pushes, including from admins. Changes land through a pull request, and the `ci` check must pass before merge. The branch must be up to date with `main`.
 
 Never commit `.env`. It is listed in `.gitignore`. Copy `.env.example` for local variables.
 
