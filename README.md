@@ -73,7 +73,15 @@ pip install -r requirements.txt
 pytest
 ```
 
-Tests cover trim order, persona retention, evicted turns, memory rank, slot supersede, and prompt section order. They do not need a running server or an API key.
+Tests cover trim order, persona retention, evicted turns, memory rank, slot supersede, and prompt section order. They do not need a running server or an API key. Leave `OPENROUTER_API_KEY` empty so the scripted provider is used.
+
+## Git workflow
+
+Branch from `main` and open a pull request. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It cancels a run when a newer commit supersedes it. The job starts PostgreSQL 16, creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness` from [`scripts/init-postgres.sql`](scripts/init-postgres.sql), then runs `pytest` with those service `DATABASE_URL`s and an empty `OPENROUTER_API_KEY`. It then runs `npm ci` and `npm run build` in `web/`. No repository secrets are required.
+
+CI must pass before merge. Merge only after that check is green.
+
+Never commit `.env`. It is listed in `.gitignore`. Copy `.env.example` for local variables.
 
 ## Phase 1 limits
 

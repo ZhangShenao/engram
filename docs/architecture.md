@@ -307,11 +307,15 @@ Web 不直连四个内部服务。
 
 ## 10. 测试
 
+本地：
+
 ```bash
 pytest
 ```
 
-覆盖裁剪顺序、人设保留、`evictedTurns`、记忆排序、槽位取代，以及 prompt 段落顺序。这些测试不启动进程、不需要 API 密钥。
+覆盖裁剪顺序、人设保留、`evictedTurns`、记忆排序、槽位取代，以及 prompt 段落顺序。这些测试不启动进程、不需要 API 密钥。`OPENROUTER_API_KEY` 为空时走脚本化 Provider。
+
+CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑同一套 `pytest`。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_gateway`、`engram_character`、`engram_conversation`、`engram_memory`、`engram_harness`，并把五个服务的 `DATABASE_URL` 指到这些库。`OPENROUTER_API_KEY` 置空。随后在 `web/` 执行 `npm ci` 和 `npm run build`。不读取仓库密钥。新的提交会取消同一 ref 上尚未结束的运行。合并只在 CI 通过之后。不要提交 `.env`。
 
 ---
 
