@@ -267,6 +267,9 @@ export function ChatPanel({ characterId }: { characterId: string }) {
           }}
         >
           <Textarea
+            id="composer"
+            name="message"
+            autoComplete="off"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={`Message ${name}`}

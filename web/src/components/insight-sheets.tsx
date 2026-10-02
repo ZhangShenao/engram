@@ -76,6 +76,8 @@ export function MemorySheet({
               <div key={memory.id} className="space-y-2 rounded-xl border border-border p-3">
                 <div className="flex items-center gap-2">
                   <select
+                    id={`memory-type-${memory.id}`}
+                    name={`memory-type-${memory.id}`}
                     className="h-8 rounded-lg border border-input bg-transparent px-2 text-xs"
                     value={memory.type}
                     onChange={(event) =>
@@ -92,10 +94,14 @@ export function MemorySheet({
                   {memory.slot && <Badge variant="secondary">{memory.slot}</Badge>}
                 </div>
                 <Input
+                  id={`memory-text-${memory.id}`}
+                  name={`memory-text-${memory.id}`}
                   value={memory.text}
                   onChange={(event) => updateLocal(memory.id, { text: event.target.value })}
                 />
                 <Input
+                  id={`memory-salience-${memory.id}`}
+                  name={`memory-salience-${memory.id}`}
                   type="number"
                   min={0}
                   max={1}

@@ -152,11 +152,15 @@ export function CharacterForm({ character }: { character?: Character }) {
             {draft.exampleDialogues.map((example, index) => (
               <div key={index} className="space-y-2 rounded-xl border border-border p-3">
                 <Textarea
+                  id={`example-user-${index}`}
+                  name={`example-user-${index}`}
                   value={example.user}
                   placeholder="User"
                   onChange={(event) => setExample(index, "user", event.target.value)}
                 />
                 <Textarea
+                  id={`example-assistant-${index}`}
+                  name={`example-assistant-${index}`}
                   value={example.assistant}
                   placeholder="Character — include *action* and dialogue"
                   onChange={(event) => setExample(index, "assistant", event.target.value)}
@@ -190,10 +194,11 @@ function Field({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const id = `character-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
-      <Input value={value} onChange={(event) => onChange(event.target.value)} />
+      <Label htmlFor={id}>{label}</Label>
+      <Input id={id} name={id} value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }
@@ -207,10 +212,11 @@ function Area({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const id = `character-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
-      <Textarea value={value} rows={3} onChange={(event) => onChange(event.target.value)} />
+      <Label htmlFor={id}>{label}</Label>
+      <Textarea id={id} name={id} value={value} rows={3} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }
