@@ -1,3 +1,13 @@
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+for _parent in Path(__file__).resolve().parents:
+    _env_file = _parent / ".env"
+    if _env_file.is_file():
+        load_dotenv(_env_file)
+        break
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 

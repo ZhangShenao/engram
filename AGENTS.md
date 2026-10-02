@@ -6,7 +6,7 @@ Engram is a Python harness plus four services, and a Next.js web app. The harnes
 
 - The browser calls only the gateway (`services/gateway`). Next proxies `/gateway/*` to it.
 - `character` owns cards. `conversation` owns sessions, messages, and summary text. `memory` owns extract, rank, slot supersede, and user edits. `harness` owns prompt assembly, the token budget, the model call, and inspector snapshots.
-- Services talk over HTTP. They do not open each other’s SQLite files.
+- Services talk over HTTP. Each one has its own Postgres database (`engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, `engram_harness`) on one local server. They do not share tables.
 - `packages/engram_contracts` is Pydantic shapes and shared constants only. Do not put prompt or ranking algorithms there.
 
 ## Where prompts live

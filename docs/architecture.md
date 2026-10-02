@@ -29,15 +29,15 @@ Phase 1 的行为（人设不可被裁掉、槽位只取代 `user_name`、滚动
 
 ## 2. 服务边界
 
-每个服务是独立的 FastAPI 进程，有 `GET /health`，以及自己的 SQLite 文件。服务之间只走 HTTP（httpx），不共享数据库连接。
+每个服务是独立的 FastAPI 进程，有 `GET /health`，以及自己的 PostgreSQL 数据库。一台本地 Postgres，五个库，互不共享表。服务之间只走 HTTP（httpx），不共享数据库连接。
 
-| 服务 | 端口 | SQLite | 拥有的决策 | 不做什么 |
+| 服务 | 端口 | 数据库 | 拥有的决策 | 不做什么 |
 |------|------|--------|------------|----------|
-| gateway | 18410 | `data/gateway.db` | 对外路由、启动时种子引导、请求日志（不含正文、不含密钥） | 不组装 prompt，不写记忆 |
-| character | 18411 | `data/character.db` | 角色卡 CRUD、空库种子（Lyra、Zero、Mara） | 不保存消息 |
-| conversation | 18412 | `data/conversation.db` | 会话、消息、滚动摘要文本、最近会话列表 | 不决定裁掉哪些 turn |
-| memory | 18413 | `data/memory.db` | 提取、排序、槽位取代、用户改/删 | 不调用聊天模型生成回复 |
-| harness | 18414 | `data/harness.db` | 上下文分层与裁剪、prompt 模板、模型调用、检查器快照 | 不直接对外给浏览器 |
+| gateway | 18410 | `engram_gateway` | 对外路由、启动时种子引导、请求日志（不含正文、不含密钥） | 不组装 prompt，不写记忆 |
+| character | 18411 | `engram_character` | 角色卡 CRUD、空库种子（Lyra、Zero、Mara） | 不保存消息 |
+| conversation | 18412 | `engram_conversation` | 会话、消息、滚动摘要文本、最近会话列表 | 不决定裁掉哪些 turn |
+| memory | 18413 | `engram_memory` | 提取、排序、槽位取代、用户改/删 | 不调用聊天模型生成回复 |
+| harness | 18414 | `engram_harness` | 上下文分层与裁剪、prompt 模板、模型调用、检查器快照 | 不直接对外给浏览器 |
 | web | 18415 | 无 | Character.AI 式交互的英文 UI | 不实现业务规则；请求打到 gateway |
 
 内部 URL 用环境变量：`CHARACTER_URL`、`CONVERSATION_URL`、`MEMORY_URL`、`HARNESS_URL`，默认即上表的 `127.0.0.1` 端口。
@@ -114,7 +114,7 @@ Web  POST /gateway/api/chats/{characterId}/stream  { message }
       6. Memory      POST /memories/rank            （query = 本轮 user 文本）
       7. Harness 本地 assemble_context
          （人设 / 记忆 / 摘要 / 最近 turn / reanchor / hint，超预算按第 7 节裁剪）
-      8. 写入 harness.db 检查器快照，先把 inspector 事件推下去
+      8. 写入 engram_harness 检查器快照，先把 inspector 事件推下去
       9. OpenRouter 或脚本化 Provider 流式生成
      10. Conversation POST /sessions/{id}/messages  （写入 assistant）
      11. Memory       POST /memories/extract
@@ -141,19 +141,19 @@ data: {"type":"error","message":"..."}
 
 ## 4. 数据归属
 
-五个库互不读取对方的文件。
+五个库在同一台 PostgreSQL 上，互不读取对方的表。连接串分别是 `CHARACTER_DATABASE_URL`、`CONVERSATION_DATABASE_URL`、`MEMORY_DATABASE_URL`、`HARNESS_DATABASE_URL`、`GATEWAY_DATABASE_URL`。容器里每个进程只拿到自己的 `DATABASE_URL`（主机名 `postgres`）。
 
-### 4.1 `character.db` · `characters`
+### 4.1 `engram_character` · `characters`
 
 `name`, `tagline`, `description`, `personality`, `scenario`, `example_dialogues`（JSON）, `greeting`, `speech_style`, `boundaries`, 时间戳。
 
-### 4.2 `conversation.db`
+### 4.2 `engram_conversation`
 
 - `chat_sessions`：`(character_id, user_id)` 唯一
 - `messages`：`role` = `user` | `assistant`
 - `session_summaries`：滚动摘要正文
 
-### 4.3 `memory.db` · `memories`
+### 4.3 `engram_memory` · `memories`
 
 | 字段 | 说明 |
 |------|------|
@@ -165,11 +165,11 @@ data: {"type":"error","message":"..."}
 | `superseded_by_id` | 被同槽新记忆取代 |
 | `deleted_at` | 软删。删除后不清除标记，检索永远跳过 |
 
-### 4.4 `harness.db` · `inspections`
+### 4.4 `engram_harness` · `inspections`
 
 每轮保存分层内容、token 估算、裁剪日志，供刷新后的 Context 面板读取。不保存 API 密钥。
 
-### 4.5 `gateway.db` · `request_log`
+### 4.5 `engram_gateway` · `request_log`
 
 方法、路径、状态码、时间。不记录 body 与请求头。
 
@@ -177,11 +177,13 @@ data: {"type":"error","message":"..."}
 
 ## 5. 本地运行拓扑
 
-不依赖旧的 Node 单体（端口 43123）。两种方式启动**五个 Python 进程 + Web**：
+不依赖旧的 Node 单体（端口 43123）。两种方式都先启动 **一台 PostgreSQL**，等到它接受连接，再启动**五个 Python 进程 + Web**。
 
 ```bash
 ./scripts/dev.sh
 ```
+
+`scripts/dev.sh` 会加载仓库根目录的 `.env`。本机有可用的 Docker 时，它执行 `docker compose up -d postgres` 并等待健康检查。否则它启动本机 PostgreSQL 集群（需要时安装 `postgresql`），创建角色 `engram` 和五个库，再用 `pg_isready` 等到 `127.0.0.1:5432` 接受连接。
 
 或：
 
@@ -189,16 +191,21 @@ data: {"type":"error","message":"..."}
 docker compose up --build
 ```
 
+Compose 里的 `postgres` 服务使用官方 `postgres:16` 镜像，`scripts/init-postgres.sql` 在首次初始化时创建五个库。应用服务 `depends_on` 该服务的 healthcheck（`pg_isready`）。
+
 ```
 浏览器
   └─ Web :18415  （Next.js Route Handler 将 /gateway/* 转到 Gateway）
-       └─ Gateway :18410
-            ├─ Character    :18411   data/character.db
-            ├─ Conversation :18412   data/conversation.db
-            ├─ Memory       :18413   data/memory.db
-            └─ Harness      :18414   data/harness.db
+       └─ Gateway :18410          engram_gateway
+            ├─ Character    :18411   engram_character
+            ├─ Conversation :18412   engram_conversation
+            ├─ Memory       :18413   engram_memory
+            └─ Harness      :18414   engram_harness
                  └─ https://openrouter.ai/api/v1/chat/completions
                     （无 OPENROUTER_API_KEY 时不发出）
+
+Postgres :5432
+  engram_gateway / engram_character / engram_conversation / engram_memory / engram_harness
 ```
 
 端口故意避开 3000、5173、8080、43123。

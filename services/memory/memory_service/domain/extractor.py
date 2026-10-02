@@ -1,8 +1,16 @@
 import json
 import os
 import re
+from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
+
+for _parent in Path(__file__).resolve().parents:
+    _env_file = _parent / ".env"
+    if _env_file.is_file():
+        load_dotenv(_env_file)
+        break
 
 from engram_contracts.constants import (
     DEFAULT_MODEL_ID,

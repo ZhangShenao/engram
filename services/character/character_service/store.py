@@ -1,13 +1,22 @@
 import json
 import os
-import sqlite3
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+import psycopg
+from dotenv import load_dotenv
+from psycopg.rows import dict_row
+
 from engram_contracts.models import CharacterCard, CharacterInput, ExampleDialogue
 
 from character_service.timeutil import now_iso
+
+for _parent in Path(__file__).resolve().parents:
+    _env_file = _parent / ".env"
+    if _env_file.is_file():
+        load_dotenv(_env_file)
+        break
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS characters (
@@ -27,16 +36,16 @@ CREATE TABLE IF NOT EXISTS characters (
 """
 
 
-def db_path() -> str:
-    return os.environ.get("SQLITE_PATH", "data/character.db")
+def database_url() -> str:
+    return os.environ.get("CHARACTER_DATABASE_URL") or os.environ.get(
+        "DATABASE_URL",
+        "postgresql://engram:engram@127.0.0.1:5432/engram_character",
+    )
 
 
 @contextmanager
 def connect():
-    path = db_path()
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg.connect(database_url(), row_factory=dict_row)
     try:
         yield conn
         conn.commit()
@@ -49,7 +58,9 @@ def connect():
 
 def init_db() -> None:
     with connect() as conn:
-        conn.executescript(SCHEMA)
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                conn.execute(statement)
 
 
 def _dialogues(raw: str) -> list[ExampleDialogue]:
@@ -57,7 +68,7 @@ def _dialogues(raw: str) -> list[ExampleDialogue]:
     return [ExampleDialogue.model_validate(item) for item in parsed]
 
 
-def row_to_character(row: sqlite3.Row) -> CharacterCard:
+def row_to_character(row: dict) -> CharacterCard:
     return CharacterCard(
         id=row["id"],
         name=row["name"],
@@ -82,7 +93,7 @@ def list_characters() -> list[CharacterCard]:
 
 def get_character(character_id: str) -> CharacterCard | None:
     with connect() as conn:
-        row = conn.execute("SELECT * FROM characters WHERE id = ?", (character_id,)).fetchone()
+        row = conn.execute("SELECT * FROM characters WHERE id = %s", (character_id,)).fetchone()
     return row_to_character(row) if row else None
 
 
@@ -101,7 +112,7 @@ def create_character(payload: CharacterInput, character_id: str | None = None) -
             INSERT INTO characters (
               id, name, tagline, description, personality, scenario,
               example_dialogues, greeting, speech_style, boundaries, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 new_id,
@@ -130,9 +141,9 @@ def update_character(character_id: str, payload: CharacterInput) -> CharacterCar
         result = conn.execute(
             """
             UPDATE characters SET
-              name=?, tagline=?, description=?, personality=?, scenario=?,
-              example_dialogues=?, greeting=?, speech_style=?, boundaries=?, updated_at=?
-            WHERE id=?
+              name=%s, tagline=%s, description=%s, personality=%s, scenario=%s,
+              example_dialogues=%s, greeting=%s, speech_style=%s, boundaries=%s, updated_at=%s
+            WHERE id=%s
             """,
             (
                 payload.name.strip(),
@@ -155,5 +166,5 @@ def update_character(character_id: str, payload: CharacterInput) -> CharacterCar
 
 def delete_character(character_id: str) -> bool:
     with connect() as conn:
-        result = conn.execute("DELETE FROM characters WHERE id = ?", (character_id,))
+        result = conn.execute("DELETE FROM characters WHERE id = %s", (character_id,))
         return result.rowcount > 0

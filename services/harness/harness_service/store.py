@@ -1,14 +1,24 @@
 import json
 import os
-import sqlite3
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+import psycopg
+from dotenv import load_dotenv
+from psycopg.rows import dict_row
+
 from harness_service.timeutil import now_iso
+
+for _parent in Path(__file__).resolve().parents:
+    _env_file = _parent / ".env"
+    if _env_file.is_file():
+        load_dotenv(_env_file)
+        break
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS inspections (
+  seq BIGINT GENERATED ALWAYS AS IDENTITY,
   id TEXT PRIMARY KEY,
   character_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -19,16 +29,16 @@ CREATE TABLE IF NOT EXISTS inspections (
 """
 
 
-def db_path() -> str:
-    return os.environ.get("SQLITE_PATH", "data/harness.db")
+def database_url() -> str:
+    return os.environ.get("HARNESS_DATABASE_URL") or os.environ.get(
+        "DATABASE_URL",
+        "postgresql://engram:engram@127.0.0.1:5432/engram_harness",
+    )
 
 
 @contextmanager
 def connect():
-    path = db_path()
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg.connect(database_url(), row_factory=dict_row)
     try:
         yield conn
         conn.commit()
@@ -41,7 +51,9 @@ def connect():
 
 def init_db() -> None:
     with connect() as conn:
-        conn.executescript(SCHEMA)
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                conn.execute(statement)
 
 
 def save_inspection(character_id: str, user_id: str, session_id: str, payload: dict) -> str:
@@ -50,7 +62,7 @@ def save_inspection(character_id: str, user_id: str, session_id: str, payload: d
         conn.execute(
             """
             INSERT INTO inspections (id, character_id, user_id, session_id, payload_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
             (
                 inspection_id,
@@ -69,8 +81,8 @@ def latest_inspection(character_id: str, user_id: str) -> dict | None:
         row = conn.execute(
             """
             SELECT payload_json FROM inspections
-            WHERE character_id = ? AND user_id = ?
-            ORDER BY created_at DESC, rowid DESC
+            WHERE character_id = %s AND user_id = %s
+            ORDER BY created_at DESC, seq DESC
             LIMIT 1
             """,
             (character_id, user_id),

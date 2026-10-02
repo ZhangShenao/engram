@@ -19,4 +19,4 @@
 
 ## 数据
 
-`data/conversation.db`：`chat_sessions`、`messages`、`session_summaries`。
+数据库 `engram_conversation`（`CONVERSATION_DATABASE_URL`）。表 `chat_sessions`、`messages`（`seq` 保证同时间戳下的顺序）、`session_summaries`。摘要追加保留末尾 4000 字符。被挤出 verbatim 窗口的 turn 才写入滚动摘要。

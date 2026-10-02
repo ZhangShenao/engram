@@ -7,7 +7,7 @@
 - 转发角色、会话、记忆、检查器请求
 - 把聊天 SSE 原样转给 Web
 - 启动时调用 Character `/internal/seed`，再为尚无消息的角色写入 greeting
-- 在 `data/gateway.db` 记录方法、路径、状态码。不记录 body 和请求头
+- 在数据库 `engram_gateway` 记录方法、路径、状态码。不记录 body 和请求头
 
 ## API
 

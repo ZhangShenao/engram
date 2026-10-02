@@ -27,4 +27,4 @@
 
 ## 数据
 
-`data/memory.db` 表 `memories`。槽位逻辑在 `memory_service/domain/slots.py`，排序在 `domain/rank.py`，取代在 `domain/supersede.py`。
+数据库 `engram_memory`（`MEMORY_DATABASE_URL`）表 `memories`。槽位取代只针对 `user_name`。`deleted_at` 是软删。槽位逻辑在 `memory_service/domain/slots.py`，排序在 `domain/rank.py`，取代在 `domain/supersede.py`。

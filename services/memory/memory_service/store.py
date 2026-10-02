@@ -1,16 +1,25 @@
 import os
-import sqlite3
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from engram_contracts.models import MemoryCandidate, MemoryRecord, MemoryType
+import psycopg
+from dotenv import load_dotenv
+from psycopg.rows import dict_row
+
+from engram_contracts.models import MemoryRecord, MemoryType
 
 from memory_service.domain.extractor import create_extractor
 from memory_service.domain.rank import rank_memories
 from memory_service.domain.slots import infer_memory_slot
 from memory_service.domain.supersede import find_superseded_memory
 from memory_service.timeutil import now_iso
+
+for _parent in Path(__file__).resolve().parents:
+    _env_file = _parent / ".env"
+    if _env_file.is_file():
+        load_dotenv(_env_file)
+        break
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -19,7 +28,7 @@ CREATE TABLE IF NOT EXISTS memories (
   user_id TEXT NOT NULL,
   type TEXT NOT NULL,
   text TEXT NOT NULL,
-  salience REAL NOT NULL,
+  salience DOUBLE PRECISION NOT NULL,
   slot TEXT,
   source_turn_id TEXT,
   superseded_by_id TEXT,
@@ -30,16 +39,16 @@ CREATE TABLE IF NOT EXISTS memories (
 """
 
 
-def db_path() -> str:
-    return os.environ.get("SQLITE_PATH", "data/memory.db")
+def database_url() -> str:
+    return os.environ.get("MEMORY_DATABASE_URL") or os.environ.get(
+        "DATABASE_URL",
+        "postgresql://engram:engram@127.0.0.1:5432/engram_memory",
+    )
 
 
 @contextmanager
 def connect():
-    path = db_path()
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg.connect(database_url(), row_factory=dict_row)
     try:
         yield conn
         conn.commit()
@@ -52,17 +61,19 @@ def connect():
 
 def init_db() -> None:
     with connect() as conn:
-        conn.executescript(SCHEMA)
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                conn.execute(statement)
 
 
-def row_to_memory(row: sqlite3.Row) -> MemoryRecord:
+def row_to_memory(row: dict) -> MemoryRecord:
     return MemoryRecord(
         id=row["id"],
         characterId=row["character_id"],
         userId=row["user_id"],
         type=row["type"],
         text=row["text"],
-        salience=row["salience"],
+        salience=float(row["salience"]),
         slot=row["slot"],
         sourceTurnId=row["source_turn_id"],
         supersededById=row["superseded_by_id"],
@@ -77,7 +88,7 @@ def list_memories(character_id: str, user_id: str) -> list[MemoryRecord]:
         rows = conn.execute(
             """
             SELECT * FROM memories
-            WHERE character_id = ? AND user_id = ?
+            WHERE character_id = %s AND user_id = %s
             ORDER BY updated_at DESC
             """,
             (character_id, user_id),
@@ -95,7 +106,7 @@ def active_memories(character_id: str, user_id: str) -> list[MemoryRecord]:
 
 def get_memory(memory_id: str) -> MemoryRecord | None:
     with connect() as conn:
-        row = conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        row = conn.execute("SELECT * FROM memories WHERE id = %s", (memory_id,)).fetchone()
     return row_to_memory(row) if row else None
 
 
@@ -108,7 +119,7 @@ def insert_memory(
     salience: float,
     slot: str | None,
     source_turn_id: str | None,
-    conn: sqlite3.Connection,
+    conn: psycopg.Connection,
 ) -> MemoryRecord:
     stamp = now_iso()
     conn.execute(
@@ -116,7 +127,7 @@ def insert_memory(
         INSERT INTO memories (
           id, character_id, user_id, type, text, salience, slot,
           source_turn_id, superseded_by_id, deleted_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, %s, %s)
         """,
         (
             memory_id,
@@ -131,13 +142,13 @@ def insert_memory(
             stamp,
         ),
     )
-    row = conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+    row = conn.execute("SELECT * FROM memories WHERE id = %s", (memory_id,)).fetchone()
     return row_to_memory(row)
 
 
-def mark_superseded(conn: sqlite3.Connection, memory_id: str, by_id: str) -> None:
+def mark_superseded(conn: psycopg.Connection, memory_id: str, by_id: str) -> None:
     conn.execute(
-        "UPDATE memories SET superseded_by_id = ?, updated_at = ? WHERE id = ?",
+        "UPDATE memories SET superseded_by_id = %s, updated_at = %s WHERE id = %s",
         (by_id, now_iso(), memory_id),
     )
 
@@ -156,7 +167,7 @@ async def extract_and_store(
         existing = [
             row_to_memory(row)
             for row in conn.execute(
-                "SELECT * FROM memories WHERE character_id = ? AND user_id = ?",
+                "SELECT * FROM memories WHERE character_id = %s AND user_id = %s",
                 (character_id, user_id),
             ).fetchall()
         ]
@@ -211,8 +222,8 @@ def update_memory(
     with connect() as conn:
         conn.execute(
             """
-            UPDATE memories SET text = ?, type = ?, salience = ?, updated_at = ?
-            WHERE id = ?
+            UPDATE memories SET text = %s, type = %s, salience = %s, updated_at = %s
+            WHERE id = %s
             """,
             (updated_text, updated_type, updated_salience, now_iso(), memory_id),
         )
@@ -225,7 +236,7 @@ def soft_delete(memory_id: str) -> bool:
         return False
     with connect() as conn:
         result = conn.execute(
-            "UPDATE memories SET deleted_at = ?, updated_at = ? WHERE id = ?",
+            "UPDATE memories SET deleted_at = %s, updated_at = %s WHERE id = %s",
             (now_iso(), now_iso(), memory_id),
         )
         return result.rowcount > 0
@@ -233,4 +244,4 @@ def soft_delete(memory_id: str) -> bool:
 
 def delete_for_character(character_id: str) -> None:
     with connect() as conn:
-        conn.execute("DELETE FROM memories WHERE character_id = ?", (character_id,))
+        conn.execute("DELETE FROM memories WHERE character_id = %s", (character_id,))

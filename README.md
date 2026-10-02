@@ -12,16 +12,16 @@ Web only. No voice, image generation, accounts, or social feed.
 |---------|------|------|
 | web | 18415 | Next.js UI |
 | gateway | 18410 | Public API, seed bootstrap, request log |
-| character | 18411 | Character cards (`data/character.db`) |
-| conversation | 18412 | Sessions, messages, rolling summary (`data/conversation.db`) |
-| memory | 18413 | Extract, rank, slot supersede, edit/delete (`data/memory.db`) |
-| harness | 18414 | Context assembly, prompts, model call, inspector snapshots (`data/harness.db`) |
+| character | 18411 | Character cards (`engram_character`) |
+| conversation | 18412 | Sessions, messages, rolling summary (`engram_conversation`) |
+| memory | 18413 | Extract, rank, slot supersede, edit/delete (`engram_memory`) |
+| harness | 18414 | Context assembly, prompts, model call, inspector snapshots (`engram_harness`) |
 
 Lyra, Zero, and Mara are seeded on an empty character database, with their greetings stored as the first assistant message.
 
 ## Run locally
 
-Requirements: Python 3.12, Node.js 20+, npm.
+Requirements: Python 3.12, Node.js 20+, npm. PostgreSQL 16 locally, or Docker.
 
 ```bash
 ./scripts/dev.sh
@@ -29,7 +29,7 @@ Requirements: Python 3.12, Node.js 20+, npm.
 
 Open [http://127.0.0.1:18415](http://127.0.0.1:18415).
 
-The script creates `.venv`, installs Python dependencies, installs the web app if needed, and starts all five services plus Next.js. It does not use the old single-process Node server.
+The script loads `.env`, creates `.venv`, installs Python dependencies, and installs the web app if needed. It starts one Postgres server and waits until it accepts connections, then starts all five services plus Next.js. With Docker available it runs `docker compose up -d postgres`. Otherwise it starts the local PostgreSQL cluster, creates the `engram` role, and creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness`. It does not use the old single-process Node server.
 
 ## Run with Docker
 
@@ -37,7 +37,7 @@ The script creates `.venv`, installs Python dependencies, installs the web app i
 docker compose up --build
 ```
 
-The web app is published on port 18415. SQLite files live in the `engram-data` volume.
+The web app is published on port 18415. Compose starts `postgres:16`, waits for `pg_isready`, then starts the services. Each service gets its own `DATABASE_URL` on that server. Data lives in the `engram-pg` volume.
 
 ## Environment
 
@@ -54,7 +54,13 @@ Copy `.env.example` if you want a file. `scripts/dev.sh` and Compose also work w
 | `HARNESS_URL` | `http://127.0.0.1:18414` | Internal |
 | `GATEWAY_URL` | `http://127.0.0.1:18410` | Used by the Next.js proxy |
 | `WEB_ORIGIN` | `http://127.0.0.1:18415` | Gateway CORS |
-| `SQLITE_PATH` | per service under `data/` | Override the SQLite file |
+| `CHARACTER_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_character` | Character cards |
+| `CONVERSATION_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_conversation` | Sessions, messages, summary |
+| `MEMORY_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_memory` | Memories |
+| `HARNESS_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_harness` | Inspector snapshots |
+| `GATEWAY_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_gateway` | Request log |
+
+Inside Compose, each container receives `DATABASE_URL` pointed at host `postgres` and its own database. A service uses its `*_DATABASE_URL` when set, and otherwise `DATABASE_URL`.
 
 With a key, chat and memory extraction call OpenRouter and send `HTTP-Referer: https://github.com/ZhangShenao/engram` plus `X-Title: Engram`. Without a key, the UI, memories, and context inspector still run.
 

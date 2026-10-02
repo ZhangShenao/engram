@@ -20,4 +20,4 @@
 
 ## 数据
 
-`data/character.db` 表 `characters`：`name`, `tagline`, `description`, `personality`, `scenario`, `example_dialogues`, `greeting`, `speech_style`, `boundaries`, `created_at`, `updated_at`。
+数据库 `engram_character`（`CHARACTER_DATABASE_URL`，容器内为 `DATABASE_URL`）。表 `characters`：`name`, `tagline`, `description`, `personality`, `scenario`, `example_dialogues`, `greeting`, `speech_style`, `boundaries`, `created_at`, `updated_at`。空库时 `POST /internal/seed` 写入 Lyra、Zero、Mara。
