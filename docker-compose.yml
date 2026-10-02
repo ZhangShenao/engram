@@ -1,0 +1,140 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: engram
+      POSTGRES_PASSWORD: engram
+      POSTGRES_DB: engram
+    ports:
+      - "5432:5432"
+    volumes:
+      - engram-pg:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engram -d engram"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  character:
+    build: .
+    command: ["python", "-m", "uvicorn", "character_service.main:app", "--host", "0.0.0.0", "--port", "18411"]
+    environment:
+      DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_character
+    ports:
+      - "18411:18411"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18411/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  conversation:
+    build: .
+    command: ["python", "-m", "uvicorn", "conversation_service.main:app", "--host", "0.0.0.0", "--port", "18412"]
+    environment:
+      DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_conversation
+    ports:
+      - "18412:18412"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18412/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  memory:
+    build: .
+    command: ["python", "-m", "uvicorn", "memory_service.main:app", "--host", "0.0.0.0", "--port", "18413"]
+    environment:
+      DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_memory
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+    ports:
+      - "18413:18413"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18413/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  harness:
+    build: .
+    command: ["python", "-m", "uvicorn", "harness_service.main:app", "--host", "0.0.0.0", "--port", "18414"]
+    environment:
+      DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_harness
+      CHARACTER_URL: http://character:18411
+      CONVERSATION_URL: http://conversation:18412
+      MEMORY_URL: http://memory:18413
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+    ports:
+      - "18414:18414"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      character:
+        condition: service_healthy
+      conversation:
+        condition: service_healthy
+      memory:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18414/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  gateway:
+    build: .
+    command: ["python", "-m", "uvicorn", "gateway_service.main:app", "--host", "0.0.0.0", "--port", "18410"]
+    environment:
+      DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_gateway
+      CHARACTER_URL: http://character:18411
+      CONVERSATION_URL: http://conversation:18412
+      MEMORY_URL: http://memory:18413
+      HARNESS_URL: http://harness:18414
+      WEB_ORIGIN: http://localhost:18415,http://127.0.0.1:18415
+    ports:
+      - "18410:18410"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      character:
+        condition: service_healthy
+      conversation:
+        condition: service_healthy
+      memory:
+        condition: service_healthy
+      harness:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18410/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    environment:
+      GATEWAY_URL: http://gateway:18410
+    ports:
+      - "18415:18415"
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+volumes:
+  engram-pg:

@@ -1,259 +1,324 @@
-# Engram — Phase 1 架构说明
+# Engram — Harness 与微服务架构
 
 > **产品名**：Engram  
-> **版本**：Phase 1（海外 Web 纯文字角色扮演，无语音 / 生图 / 社交流）  
-> **目标读者**：产品负责人  
-> **技术栈**：Next.js、TypeScript、Tailwind、shadcn/ui、本地 SQLite
+> **版本**：Phase 1（海外 Web 纯文字角色扮演）  
+> **读者**：产品负责人与实现者  
+> **运行时**：Python 3.12 微服务 + Next.js Web。无 Kubernetes。
+
+Engram 的 **Harness** 是我们自己的角色扮演编排服务，不是第三方产品。它负责组装 prompt、维持人设稳定与 token 预算、检索记忆、调用模型，并写回记忆与滚动摘要。角色卡、会话、记忆各自是它调用的独立服务。Web 只访问 Gateway。
 
 ---
 
-## 1. 产品范围与原则
+## 1. 为什么是 Harness，再加上这些服务
 
-Engram 交付一条可完整演示的「创建角色 → 对话 → 记忆沉淀 → 上下文可观测」闭环。所有送入模型的上下文必须由**显式模块**组装，禁止在 API 路由内散落模板字符串。
+Phase 1 的行为（人设不可被裁掉、槽位只取代 `user_name`、滚动摘要只吃被挤出的 turn、无密钥仍可演示）必须有一个明确的编排者。若把这些规则散落在 Web 的 API Route 里，裁剪顺序和记忆写入会跟路由绑死，也无法单独测试。
 
-核心原则：
+拆成五个进程，是为了把**谁拥有数据**和**谁做决定**分开：
 
-- **人设稳定优先**：长对话中人设前缀与边界不可被裁剪；至少保留一条示例对话锚点。
-- **记忆可管可控**：用户可编辑 / 删除；已删除记忆永不回流。
-- **可观测**：每轮可在 Context Inspector 中看到分层内容与裁剪结果。
-- **无密钥可演示**：未配置 LLM 时，脚本化 Provider 仍驱动完整 UI 与数据路径。
+| 服务 | 为什么单独存在 |
+|------|----------------|
+| **gateway** | Web 的唯一入口。鉴权以后可以只加在这里；现在它只做转发、CORS，以及启动时的种子引导。 |
+| **character** | 角色卡是相对稳定的主数据，和某一轮聊天无关。 |
+| **conversation** | 会话、原文消息、滚动摘要是时间线。摘要的文本归会话服务保存，但**何时追加**由 Harness 决定。 |
+| **memory** | 提取、排序、槽位取代、用户编辑/删除都作用在记忆上。已删除行只留在这个库里，不会被别的服务“恢复”。 |
+| **harness** | 唯一知道完整 prompt 长什么样的服务。它调用上面三者，再调用 OpenRouter 或脚本化 Provider。 |
+
+共享包 `packages/engram_contracts` 只有 Pydantic 契约（角色卡、记忆、上下文层、常量）。算法留在拥有它的服务里。
 
 ---
 
-## 2. 模块地图（Module Map）
+## 2. 服务边界
 
-| 路径 | 职责 |
-|------|------|
-| `src/app/` | 页面与 API Routes（角色 CRUD、聊天流式、记忆 API） |
-| `src/lib/persona/` | 角色卡类型、稳定人设正文、输出形态常量 |
-| `src/lib/prompt/` | 版本化 Prompt 模板与 `buildPromptSections` |
-| `src/lib/context/` | Token 估算、`assembleContext`（分层、裁剪、`evictedTurns`） |
-| `src/lib/memory/` | 记忆类型、排序、槽位、取代、提取器、服务 |
-| `src/lib/llm/` | `LLMProvider` 接口、OpenAI 兼容实现、脚本化实现、`createLLMProvider` |
-| `src/lib/db/` | SQLite 迁移、CRUD、种子角色 |
-| `src/lib/chat/` | `runChatTurn` 编排、滚动摘要格式化 |
-| `src/components/` | 角色表单、Context Inspector、Memory Panel |
+每个服务是独立的 FastAPI 进程，有 `GET /health`，以及自己的 PostgreSQL 数据库。一台本地 Postgres，五个库，互不共享表。服务之间只走 HTTP（httpx），不共享数据库连接。
 
-**请求主路径（聊天）**：
+| 服务 | 端口 | 数据库 | 拥有的决策 | 不做什么 |
+|------|------|--------|------------|----------|
+| gateway | 18410 | `engram_gateway` | 对外路由、启动时种子引导、请求日志（不含正文、不含密钥） | 不组装 prompt，不写记忆 |
+| character | 18411 | `engram_character` | 角色卡 CRUD、空库种子（Lyra、Zero、Mara） | 不保存消息 |
+| conversation | 18412 | `engram_conversation` | 会话、消息、滚动摘要文本、最近会话列表 | 不决定裁掉哪些 turn |
+| memory | 18413 | `engram_memory` | 提取、排序、槽位取代、用户改/删 | 不调用聊天模型生成回复 |
+| harness | 18414 | `engram_harness` | 上下文分层与裁剪、prompt 模板、模型调用、检查器快照 | 不直接对外给浏览器 |
+| web | 18415 | 无 | Character.AI 式交互的英文 UI | 不实现业务规则；请求打到 gateway |
+
+内部 URL 用环境变量：`CHARACTER_URL`、`CONVERSATION_URL`、`MEMORY_URL`、`HARNESS_URL`，默认即上表的 `127.0.0.1` 端口。
+
+### 2.1 Gateway（Web 唯一公开 API）
+
+- `GET /api/characters`、`POST /api/characters`、`GET|PUT|DELETE /api/characters/{id}`
+- `GET /api/chats` 最近会话
+- `GET /api/chats/{characterId}` 会话与消息
+- `POST /api/chats/{characterId}/stream` 新的一轮（SSE）
+- `POST /api/chats/{characterId}/regenerate` 重写最后一条助手消息（SSE）
+- `POST /api/chats/{characterId}/continue` 续写（SSE）
+- `GET /api/memories/{characterId}`、`PATCH /api/memories/{memoryId}`、`DELETE /api/memories/{memoryId}`
+- `GET /api/inspector/{characterId}` 最近一次检查器快照
+
+用户 id 固定为 `local`。没有注册登录。
+
+### 2.2 Character
+
+`GET|POST /characters`，`GET|PUT|DELETE /characters/{id}`，`POST /internal/seed`（空库才插入三个种子角色）。
+
+### 2.3 Conversation
+
+- `POST /sessions/ensure`：按 `(character_id, user_id)` 取或建会话
+- `GET /sessions/by-character/{characterId}`
+- `GET|POST /sessions/{id}/messages`
+- `POST /sessions/{id}/messages/{messageId}/replace`：同一事务里写入新消息并删除旧消息（regenerate）
+- `DELETE /sessions/{id}/messages/{messageId}`
+- `GET /sessions/{id}/summary`、`POST /sessions/{id}/summary/append`
+- `GET /sessions/recent`
+- `POST /internal/ensure-greeting`：会话尚无消息时写入角色 greeting
+- `DELETE /sessions/by-character/{characterId}`
+
+摘要追加时保留末尾约 4000 字符，与 Phase 1 一致。
+
+### 2.4 Memory
+
+- `GET /memories`：活跃记忆（无 `deleted_at`、无 `superseded_by_id`）
+- `POST /memories/rank`：按 salience、新近度、词面相关度排序
+- `POST /memories/extract`：从一轮对白提取候选，解析槽位，必要时取代，再插入。模型给出的 `slot` 只有 `user_name` 会保留，其它字符串丢掉后再按类型和正文推断
+- `POST /memories/discard-turn`：按 `sourceTurnId` 软删某一轮产生的记忆
+- `PATCH /memories/{id}`、`DELETE /memories/{id}`（软删）
+- `DELETE /memories`：按角色清空（删角色时）
+
+无 `OPENROUTER_API_KEY` 时用确定性提取器；有密钥时用 OpenRouter JSON 提取。提取失败返回空列表，不阻断聊天。
+
+### 2.5 Harness
+
+- `POST /turns/stream`：编排一整轮，SSE 事件 `inspector`、`chunk`、`done`、`error`
+- `GET /inspections/{characterId}`：该角色最近一次检查器快照
+
+Prompt 与裁剪代码：
+
+- `services/harness/harness_service/persona/stability.py`
+- `services/harness/harness_service/prompt/templates.py`、`builder.py`
+- `services/harness/harness_service/context/assembler.py`、`tokens.py`
+- `services/harness/harness_service/llm/`（OpenRouter 与脚本化 Provider）
+- `services/harness/harness_service/orchestrator.py`
+
+排序只在 Memory 的 `POST /memories/rank`（`domain/rank.py`）里做。Harness 按该响应的顺序做 token 预算装箱，不再导入 Memory 的排序实现。
+
+---
+
+## 3. 一轮聊天的同步请求路径
+
+`mode=chat`。浏览器通过 Next 同源代理访问 Gateway，Gateway 把 SSE 原样转给浏览器。
 
 ```
-UI → POST /api/chat/[id]/stream
-  → insertMessage(user)
-  → assembleContext → createLLMProvider().streamChat
-  → insertMessage(assistant)
-  → memoryService.processAssistantTurn
-  → appendToSummary(evictedTurns only)
+Web  POST /gateway/api/chats/{characterId}/stream  { message }
+ └─ Gateway  POST harness /turns/stream
+      1. Character   GET  /characters/{id}
+      2. Conversation POST /sessions/ensure
+      3. Conversation POST /sessions/{id}/messages   （写入 user 消息）
+      4. Conversation GET  /sessions/{id}/messages   （verbatim 不含刚写入的这条 user）
+      5. Conversation GET  /sessions/{id}/summary
+      6. Memory      POST /memories/rank            （query = 本轮 user 文本）
+      7. Harness 本地 assemble_context
+         （人设 / 记忆 / 摘要 / 最近 turn / reanchor / hint，超预算按第 7 节裁剪）
+      8. 写入 engram_harness 检查器快照，先把 inspector 事件推下去
+      9. OpenRouter 或脚本化 Provider 流式生成
+     10. Conversation POST /sessions/{id}/messages  （写入 assistant）
+     11. Memory       POST /memories/extract
+     12. 若 evictedTurns 非空：
+         Conversation POST /sessions/{id}/summary/append
+         （只追加被挤出 verbatim 窗口的 turn 原文）
+     13. SSE done
+```
+
+`regenerate`：不新增 user 消息。最后一条必须是 assistant。若它的前一条也是 assistant（续写），prompt 保留更早的回复，只替换最后一条，发给模型的最新 user 行是续写指令。否则 verbatim 截到最后一条 user 之前，待替换的 assistant 不进入 prompt。新回复和删除旧回复在 Conversation 的一次事务里完成；事务失败时旧回复还在。替换成功后、提取新记忆之前，软删 `source_turn_id` 等于旧回复的记忆。
+
+`continue`：不落库续写指令，也不把该指令交给记忆提取。verbatim 为全部历史；发给模型的最后一条 user 是续写指令（不计入可裁剪窗口）。排序 query 用上一条真实 user 文本。新的 assistant 消息另起一条。
+
+SSE 形状：
+
+```
+data: {"type":"inspector","inspector":{...}}
+data: {"type":"chunk","text":"..."}
+data: {"type":"done","messageId":"...","content":"...","sessionId":"...","provider":"scripted|openrouter"}
+data: {"type":"error","message":"..."}
 ```
 
 ---
 
-## 3. 数据模型（Data Model）
+## 4. 数据归属
 
-SQLite 文件：`data/roleplay.db`（`userId` 固定为 `local`，无鉴权）。
+五个库在同一台 PostgreSQL 上，互不读取对方的表。连接串分别是 `CHARACTER_DATABASE_URL`、`CONVERSATION_DATABASE_URL`、`MEMORY_DATABASE_URL`、`HARNESS_DATABASE_URL`、`GATEWAY_DATABASE_URL`。容器里每个进程只拿到自己的 `DATABASE_URL`（主机名 `postgres`）。
 
-### 3.1 `characters`
+### 4.1 `engram_character` · `characters`
 
-角色卡：`name`, `tagline`, `description`, `personality`, `scenario`, `example_dialogues`（JSON 数组）, `greeting`, `speech_style`, `boundaries`, 时间戳。
+`name`, `tagline`, `description`, `personality`, `scenario`, `example_dialogues`（JSON）, `greeting`, `speech_style`, `boundaries`, 时间戳。
 
-### 3.2 `chat_sessions`
+### 4.2 `engram_conversation`
 
-`(character_id, user_id)` 唯一，一会话一行。
+- `chat_sessions`：`(character_id, user_id)` 唯一
+- `messages`：`role` = `user` | `assistant`
+- `session_summaries`：滚动摘要正文
 
-### 3.3 `messages`
-
-`session_id`, `role`（`user` | `assistant`）, `content`, `created_at`。
-
-### 3.4 `session_summaries`
-
-`session_id` → `summary_text`（滚动摘要，仅追加 **被挤出 verbatim 窗口** 的 turn 原文）。
-
-### 3.5 `memories`
+### 4.3 `engram_memory` · `memories`
 
 | 字段 | 说明 |
 |------|------|
 | `type` | `fact` \| `relationship` \| `promise` \| `boundary` \| `plot` |
-| `text` | 可读记忆正文 |
-| `salience` | 0–1，检索权重 |
-| `slot` | 可选单值槽（见 §4.3） |
-| `source_turn_id` | 写入来源消息 |
-| `superseded_by_id` | 被新记忆取代时指向新 id |
-| `deleted_at` | 软删 |
+| `text` | 正文 |
+| `salience` | 0–1 |
+| `slot` | 可空。Phase 1 仅 `user_name` 会触发取代 |
+| `source_turn_id` | 来源 assistant 消息 |
+| `superseded_by_id` | 被同槽新记忆取代 |
+| `deleted_at` | 软删。删除后不清除标记，检索永远跳过 |
+
+### 4.4 `engram_harness` · `inspections`
+
+每轮保存分层内容、token 估算、裁剪日志，供刷新后的 Context 面板读取。不保存 API 密钥。
+
+### 4.5 `engram_gateway` · `request_log`
+
+方法、路径、状态码、时间。不记录 body 与请求头。
 
 ---
 
-## 4. 角色与人设（Persona）
+## 5. 本地运行拓扑
 
-### 4.1 角色卡字段
-
-见 Phase 1 产品：`name`, `tagline`, `description`, `personality`, `scenario`, `exampleDialogues`, `greeting`, `speechStyle`, `boundaries`。
-
-### 4.2 反漂移
-
-- 稳定 L0：身份 + 边界 + ≥1 示例对话 + 输出形态（`*动作*` + 台词）
-- Re-anchor 短提醒；禁止「通用助手」口吻
-- 裁剪时 **永不** 丢弃 L0 核心人设与 `boundaries`
-
-实现：`src/lib/persona/stability.ts`，由 `src/lib/context/assembler.ts` 调用。
-
----
-
-## 5. 记忆（Memory）
-
-### 5.1 写入
-
-每轮助手消息完成后，`MemoryService` 调用 `createMemoryExtractor()`：
-
-- **无 `LLM_API_KEY`**：`DeterministicMemoryExtractor`（规则 / 关键词）
-- **有 Key**：`LLMMemoryExtractor`（OpenAI 兼容 JSON）
-
-### 5.2 读取
-
-`rankMemories`：salience + recency + 词面相关度 → 在记忆层 token 预算内 `packMemoriesByTokenBudget`。
-
-### 5.3 记忆槽位（Memory Slots）
-
-**同类型多条记忆可以并存**（多个 fact、promise、plot 等）。**取代**仅当：
-
-1. 候选带 `supersedesMemoryId`；或  
-2. 与某条活跃记忆 **同一 `slot`**
-
-Phase 1 内置槽位（`src/lib/memory/slots.ts`）：
-
-| `slot` | 含义 |
-|--------|------|
-| `user_name` | 用户姓名（全局仅一条活跃） |
-
-槽位解析：`inferMemorySlot(type, text)`；写入时持久化到 `memories.slot`。
-
-### 5.4 如何新增一个记忆槽位
-
-1. 在 `src/lib/memory/slots.ts` 的 `MEMORY_SLOTS` 增加常量（如 `USER_CITY: "user_city"`）。
-2. 在 `inferMemorySlot()` 中为对应 `type` + 文本模式返回新槽位（或让 LLM / 规则提取器在 `MemoryCandidate.slot` 中显式赋值）。
-3. 在 `findSupersededMemory()` 中已按 `slot` 匹配，无需改取代逻辑。
-4. 为提取器（确定性或 LLM prompt）补充该槽位的生成规则。
-5. 增加单元测试：同槽两条应取代；不同槽或无关 fact 应并存。
-
----
-
-## 6. Prompt 工程
-
-模块：`src/lib/prompt/`（`PROMPT_VERSION`, `PROMPT_SECTION_ORDER`）。
-
-- 人设块、记忆块、摘要块、重锚、生成提示 — 顺序由测试锁定（`builder.test.ts`）。
-- API Route **不得**内联大段 system 模板。
-
----
-
-## 7. 上下文分层与裁剪（Context Layers & Trim Order）
-
-### 7.1 层（自外向内注入 system，再 verbatim turns）
-
-| 层 ID | 内容 | 裁剪优先级 |
-|-------|------|------------|
-| persona | 稳定人设 + 边界 + 示例 + 输出形态 | **最后**（仅可减少示例条数，≥1） |
-| memories | 检索到的记忆列表 | 低分记忆可丢 |
-| summary | 滚动摘要 | 可截断 |
-| recent | 最近 turn 原文 | **最先**丢最旧 pair |
-| reanchor | 短重锚 | 不丢 |
-| hint | 生成提示 | 不丢 |
-
-默认总预算：`DEFAULT_CONTEXT_TOKEN_BUDGET`（4096）；估算：`ceil(chars/4)`。
-
-### 7.2 超预算裁剪顺序（Trim Order）
-
-1. 移除最旧 verbatim turn pair → 记入 **`evictedTurns`**
-2. 缩短 rolling summary
-3. 减少装入上下文的记忆条数
-4. 减少示例对话条数（仍 ≥1）
-5. **永不丢弃**：人设核心、`boundaries`、reanchor、hint
-
-### 7.3 滚动摘要
-
-仅当 `evictedTurns.length > 0` 时，`formatEvictedTurnsForSummary` 追加到 `session_summaries` — **不使用** `trimLog` 或任意 history 切片。
-
-实现：`src/lib/context/assembler.ts`，`src/lib/chat/summary.ts`，`orchestrator` / stream route。
-
----
-
-## 8. LLM 接入与扩展
-
-### 8.1 环境变量
-
-| 变量 | 默认 |
-|------|------|
-| `LLM_API_KEY` | 空 → 脚本化 Provider |
-| `LLM_BASE_URL` | `https://api.openai.com/v1` |
-| `LLM_MODEL` | `gpt-4o-mini` |
-
-### 8.2 现有实现
-
-- 接口：`src/lib/llm/provider.ts` — `streamChat(messages, onChunk) => fullText`
-- 工厂：`createLLMProvider()` — 有 Key 用 `OpenAICompatibleProvider`，否则 `ScriptedLLMProvider`
-
-### 8.3 如何新增一个 LLM Provider
-
-1. 在 `src/lib/llm/` 新建类，实现 `LLMProvider`（`name` + `streamChat`）。
-2. 在 `src/lib/llm/factory.ts` 中按环境变量或配置分支（例如 `LLM_PROVIDER=anthropic`）实例化该类。
-3. 若 API 非 OpenAI 兼容，在 Provider 内将 `assembleContext` 产出的 `messages` 映射为目标 API 格式。
-4. 聊天与记忆提取共用 `getLLMConfig()`；记忆提取单独走 `createMemoryExtractor()`，可复用同一 Key。
-
-**注意**：Phase 1 不要求多 Provider 并存；扩展时保持无 Key 时脚本化路径可用。
-
----
-
-## 9. 前端（Phase 1）
-
-- 英文 UI；产品名 **Engram**
-- 首页：角色库；聊天页：流式消息 + Context / Memory（桌面侧栏，移动 Tab）
-- 种子 3 角色：Lyra、Zero、Mara
-
----
-
-## 10. Phase 1 明确不包含
-
-- 用户注册 / 登录、多租户、云同步  
-- **语音**、**图片生成**、角色立绘  
-- **社交动态**、关注、公开广场  
-- 原生 iOS / Android  
-- 向量库 / Embedding 检索（仅词面相关度）  
-- 多人 / 群聊  
-- 付费、模型路由、中心化内容审核管线（仅角色卡 `boundaries` 约束模型）
-
----
-
-## 11. 测试
+不依赖旧的 Node 单体（端口 43123）。两种方式都先启动 **一台 PostgreSQL**，等到它接受连接，再启动**五个 Python 进程 + Web**。
 
 ```bash
-npm test
+./scripts/dev.sh
 ```
 
-覆盖：`context/assembler`（裁剪、persona 保留、`evictedTurns`）、`memory/rank` & `supersede`、`prompt/builder`。
+`scripts/dev.sh` 会加载仓库根目录的 `.env`。本机有可用的 Docker 时，它执行 `docker compose up -d postgres` 并等待健康检查。否则它启动本机 PostgreSQL 集群（需要时安装 `postgresql`），创建角色 `engram` 和五个库，再用 `pg_isready` 等到 `127.0.0.1:5432` 接受连接。
 
----
+或：
 
-## 12. 模块依赖（简图）
-
-```mermaid
-flowchart TB
-  UI[Engram Web UI] --> API[API Routes]
-  API --> CTX[Context Assembler]
-  API --> MEM[Memory Service]
-  API --> DB[(SQLite)]
-  CTX --> PRM[Prompt Builder]
-  CTX --> PERS[Persona Stability]
-  API --> LLM[LLM Provider Factory]
-  MEM --> EXT[Memory Extractor Factory]
+```bash
+docker compose up --build
 ```
 
+Compose 里的 `postgres` 服务使用官方 `postgres:16` 镜像，`scripts/init-postgres.sql` 在首次初始化时创建五个库。应用服务 `depends_on` 该服务的 healthcheck（`pg_isready`）。
+
+```
+浏览器
+  └─ Web :18415  （Next.js Route Handler 将 /gateway/* 转到 Gateway）
+       └─ Gateway :18410          engram_gateway
+            ├─ Character    :18411   engram_character
+            ├─ Conversation :18412   engram_conversation
+            ├─ Memory       :18413   engram_memory
+            └─ Harness      :18414   engram_harness
+                 └─ https://openrouter.ai/api/v1/chat/completions
+                    （无 OPENROUTER_API_KEY 时不发出）
+
+Postgres :5432
+  engram_gateway / engram_character / engram_conversation / engram_memory / engram_harness
+```
+
+端口故意避开 3000、5173、8080、43123。
+
+Gateway 启动时会重试调用 Character 的 `/internal/seed`，再为每个尚无消息的角色写入 greeting。因此第一次打开即可和 Lyra、Zero、Mara 聊天。
+
 ---
 
-## 13. Phase 1 成功标准
+## 6. 不在范围内
 
-1. 无 API Key 可完成对话并查看 Inspector 各层。  
-2. 有 Key 时走真实流式模型与 LLM 记忆提取。  
-3. 记忆可增删改，下轮检索与 Inspector 一致。  
-4. 长历史单测证明 persona 层仍在；`evictedTurns` 正确驱动摘要。
+- 用户注册 / 登录、多租户、云同步
+- 语音、图片生成、角色立绘
+- 社交动态、关注、公开广场
+- 原生 iOS / Android
+- 向量库 / Embedding（相关度只有词面重叠）
+- 多人 / 群聊
+- Kubernetes、服务网格、集中式内容审核管线（只有角色卡 `boundaries` 约束模型）
+- 付费与多模型路由（环境变量指定单一 OpenRouter 模型）
 
 ---
 
-*仓库 canonical 路径：`docs/architecture.md`*
+## 7. 必须保留的 Phase 1 行为
+
+### 7.1 人设稳定
+
+稳定前缀始终包含身份、边界、至少一条示例对话、输出形态（`*动作*` + 台词）。Re-anchor 与生成提示不裁。实现：`persona/stability.py`，由 `context/assembler.py` 调用。
+
+### 7.2 上下文层与裁剪顺序
+
+默认预算 `4096`。估算 `ceil(字符数 / 4)`。
+
+| 层 | 裁剪 |
+|----|------|
+| persona | 最后才减少示例条数，且 ≥ 1。核心人设与 boundaries 永不丢 |
+| memories | 可丢低分记忆 |
+| summary | 可截断 |
+| recent | **最先**丢最旧的 turn pair，并记入 `evictedTurns` |
+| reanchor、hint | 不丢 |
+
+超预算顺序：
+
+1. 移除最旧 verbatim turn pair → `evictedTurns`
+2. 缩短 rolling summary
+3. 减少已装入的记忆
+4. 减少示例对话（仍 ≥ 1）
+5. 永不丢弃：人设核心、`boundaries`、reanchor、hint
+
+刚发送的 user 文本不在 verbatim 窗口里，因此不会被写进摘要。滚动摘要**只**追加 `evictedTurns`。
+
+### 7.3 记忆
+
+同类型多条可以并存。取代仅当候选带 `supersedesMemoryId`，或与某条活跃记忆同属一个槽位。
+
+Phase 1 唯一内置槽位：`user_name`（`services/memory/memory_service/domain/slots.py`）。`infer_memory_slot` 只在 fact 且文本像姓名时返回该槽。
+
+新增槽位：在 `MEMORY_SLOTS` 增加常量，在 `infer_memory_slot`（或提取器的 `slot` 字段）返回它。`find_superseded_memory` 已按槽匹配。补一条单测：同槽取代，不同槽并存。
+
+排序权重：salience 0.45、recency 0.35、relevance 0.20。已删除与已取代的记忆不参与。
+
+### 7.4 无密钥
+
+`OPENROUTER_API_KEY` 为空时，Harness 使用脚本化流式 Provider，Memory 使用确定性提取器。UI、记忆面板、检查器仍然可用。
+
+### 7.5 Prompt 段落顺序
+
+`PROMPT_SECTION_ORDER`：`persona_identity`、`boundaries`、`style_anchors`、`output_shape`、`memories`、`rolling_summary`、`reanchor`、`recent_turns`、`generation_hint`。
+
+---
+
+## 8. 模型
+
+Chat Completions：`https://openrouter.ai/api/v1/chat/completions`。
+
+默认模型 id 为 **`anthropic/claude-sonnet-5`**。该 id 已对照 OpenRouter 公开模型列表确认存在，因此作为 `OPENROUTER_MODEL` 的默认值，而不是改写成别的 Sonnet。
+
+请求头：
+
+- `Authorization: Bearer <OPENROUTER_API_KEY>`
+- `HTTP-Referer: https://github.com/ZhangShenao/engram`
+- `X-Title: Engram`
+
+记忆提取在有密钥时走同一 base URL、同一模型与同一对产品头，`temperature` 0.2，要求 JSON。
+
+---
+
+## 9. 前端
+
+`web/`：Next.js、TypeScript、Tailwind、shadcn/ui。英文文案。深色全高壳层。
+
+- 左栏：Engram、新建角色、角色列表、最近会话。窄屏改为抽屉。
+- 中间：名称与 tagline、流式气泡、钉在底部的输入框。
+- 最后一条助手消息：Regenerate、Continue。
+- 创建/编辑角色是独立的专注流程，不是聊天里的一块侧栏。
+- 仅 Engram 提供的右侧滑层：记忆（编辑/删除）与上下文检查器（分层、token 估算、裁剪日志）。
+
+Web 不直连四个内部服务。
+
+---
+
+## 10. 测试
+
+本地：
+
+```bash
+pytest
+```
+
+覆盖裁剪顺序、人设保留、`evictedTurns`、记忆排序、槽位取代，以及 prompt 段落顺序。这些测试不启动进程、不需要 API 密钥。`OPENROUTER_API_KEY` 为空时走脚本化 Provider。
+
+CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑同一套 `pytest`。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_gateway`、`engram_character`、`engram_conversation`、`engram_memory`、`engram_harness`，并把五个服务的 `DATABASE_URL` 指到这些库。`OPENROUTER_API_KEY` 置空。随后在 `web/` 执行 `npm ci` 和 `npm run build`。不读取仓库密钥。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
+
+---
+
+*仓库内的规范以本文为准。*
