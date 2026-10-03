@@ -8,9 +8,8 @@ import psycopg
 from dotenv import load_dotenv
 from psycopg.rows import dict_row
 
-from engram_contracts.models import CharacterCard, CharacterInput, ExampleDialogue
-
 from character_service.timeutil import now_iso
+from engram_contracts.models import CharacterCard, CharacterInput, ExampleDialogue
 
 for _parent in Path(__file__).resolve().parents:
     _env_file = _parent / ".env"

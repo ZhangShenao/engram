@@ -103,7 +103,9 @@ def test_create_character_fails_when_greeting_is_not_stored(monkeypatch):
     result = asyncio.run(create_character(CharacterInput(name="Nova", greeting="Hey")))
     assert isinstance(result, JSONResponse)
     assert result.status_code == 500
-    assert any(call[0] == "DELETE" and call[1].rstrip("/").endswith("/characters/new-id") for call in calls)
+    assert any(
+        call[0] == "DELETE" and call[1].rstrip("/").endswith("/characters/new-id") for call in calls
+    )
     assert not isinstance(result, dict)
 
 

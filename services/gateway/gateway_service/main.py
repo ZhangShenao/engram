@@ -20,7 +20,6 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from engram_contracts.constants import LOCAL_USER_ID
 from engram_contracts.models import CharacterInput
-
 from gateway_service.store import init_db, log_request
 
 logger = logging.getLogger("engram.gateway")
@@ -148,7 +147,11 @@ def _proxy_error(response: httpx.Response) -> JSONResponse:
     try:
         payload = response.json()
         if isinstance(payload, dict) and "detail" in payload and "error" not in payload:
-            payload = {"error": payload["detail"] if isinstance(payload["detail"], str) else payload["detail"]}
+            payload = {
+                "error": payload["detail"]
+                if isinstance(payload["detail"], str)
+                else payload["detail"]
+            }
     except Exception:
         payload = {"error": response.text[:300] or "Request failed"}
     return JSONResponse(payload, status_code=response.status_code)
@@ -274,12 +277,8 @@ async def get_chat(character_id: str):
         if session_response.status_code >= 400:
             return _proxy_error(session_response)
         session_id = session_response.json()["sessionId"]
-        messages_response = await client.get(
-            f"{conversation_url()}/sessions/{session_id}/messages"
-        )
-        summary_response = await client.get(
-            f"{conversation_url()}/sessions/{session_id}/summary"
-        )
+        messages_response = await client.get(f"{conversation_url()}/sessions/{session_id}/messages")
+        summary_response = await client.get(f"{conversation_url()}/sessions/{session_id}/summary")
     if messages_response.status_code >= 400:
         return _proxy_error(messages_response)
     return {
@@ -320,7 +319,9 @@ async def _proxy_turn(character_id: str, mode: str, message: str):
             headers_ms,
             response.status_code,
         )
-        return Response(content=body, status_code=response.status_code, media_type="application/json")
+        return Response(
+            content=body, status_code=response.status_code, media_type="application/json"
+        )
 
     async def generate_open():
         first_byte_ms: int | None = None

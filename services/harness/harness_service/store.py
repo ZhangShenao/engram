@@ -61,7 +61,8 @@ def save_inspection(character_id: str, user_id: str, session_id: str, payload: d
     with connect() as conn:
         conn.execute(
             """
-            INSERT INTO inspections (id, character_id, user_id, session_id, payload_json, created_at)
+            INSERT INTO inspections
+                (id, character_id, user_id, session_id, payload_json, created_at)
             VALUES (%s, %s, %s, %s, %s, %s)
             """,
             (

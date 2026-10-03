@@ -13,7 +13,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from engram_contracts.models import MEMORY_TYPES, MemoryType
-
 from memory_service.domain.extractor import aclose_llm_client
 from memory_service.store import (
     active_memories,
@@ -25,6 +24,7 @@ from memory_service.store import (
     soft_delete_by_source_turn,
     update_memory,
 )
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):

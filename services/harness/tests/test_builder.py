@@ -40,9 +40,7 @@ def test_includes_persona_boundaries_and_output_shape():
         memories=[],
         summary="They met before.",
     )
-    assert assert_persona_contains_boundaries(
-        built.system_persona, sample_character.boundaries
-    )
+    assert assert_persona_contains_boundaries(built.system_persona, sample_character.boundaries)
     assert "*nods*" in built.system_persona or "*" in built.system_persona
     assert "NOT a generic AI assistant" in built.system_persona
     assert "Test Hero" in build_generation_hint(sample_character.name)

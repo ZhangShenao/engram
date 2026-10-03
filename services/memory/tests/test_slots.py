@@ -111,9 +111,7 @@ def test_persisted_invented_slots_do_not_supersede_each_other(monkeypatch):
         ),
     )
     try:
-        created = asyncio.run(
-            extract_and_store(character_id, user_id, "hi", "hello", "turn-1")
-        )
+        created = asyncio.run(extract_and_store(character_id, user_id, "hi", "hello", "turn-1"))
         assert [memory.slot for memory in created] == [None, None]
         stored = list_memories(character_id, user_id)
         assert len(stored) == 2

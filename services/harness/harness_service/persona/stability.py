@@ -33,7 +33,8 @@ def build_stable_persona_body(
     )
     parts = [
         f"You are {character.name}. You are a fictional character in an immersive text roleplay.",
-        "You are NOT a generic AI assistant. Never say you are an AI or refuse in an assistant-like way.",
+        "You are NOT a generic AI assistant. "
+        "Never say you are an AI or refuse in an assistant-like way.",
         "",
         f"Tagline: {character.tagline}",
         f"Description: {character.description}",

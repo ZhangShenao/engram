@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from engram_contracts.models import MemoryCandidate, MemoryRecord
 from memory_service.domain.supersede import find_superseded_memory
 
 
 def mem(**partial) -> MemoryRecord:
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     data = {
         "id": partial.pop("id"),
         "text": partial.pop("text"),

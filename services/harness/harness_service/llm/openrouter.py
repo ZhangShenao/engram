@@ -19,7 +19,6 @@ from engram_contracts.constants import (
 )
 from engram_contracts.models import ChatMessage
 
-
 LLM_LIMITS = httpx.Limits(
     max_connections=20,
     max_keepalive_connections=10,

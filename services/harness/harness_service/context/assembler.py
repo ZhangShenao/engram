@@ -8,6 +8,7 @@ from engram_contracts.models import (
     MemoryRecord,
     VerbatimTurn,
 )
+from harness_service.context.pack import pack_memories_by_token_budget
 from harness_service.context.tokens import (
     DEFAULT_CONTEXT_TOKEN_BUDGET,
     LAYER_BUDGET_HINTS,
@@ -25,7 +26,6 @@ from harness_service.prompt.builder import (
     format_memories_block,
     format_summary_block,
 )
-from harness_service.context.pack import pack_memories_by_token_budget
 from harness_service.prompt.templates import PROMPT_SECTION_ORDER
 
 
@@ -78,9 +78,7 @@ def assemble_context(
         estimate_tokens,
     )
     if dropped_memories:
-        trim_log.append(
-            f"Dropped {len(dropped_memories)} lower-ranked memories from context."
-        )
+        trim_log.append(f"Dropped {len(dropped_memories)} lower-ranked memories from context.")
 
     pairs = turns_to_pairs(list(verbatim_turns))
     trimmed_turn_ids: list[str] = []
@@ -94,9 +92,7 @@ def assemble_context(
         sum_block = format_summary_block(summary_text)
         hint = build_generation_hint(character.name)
         flat = [turn for pair in pairs for turn in pair]
-        recent_content = (
-            "\n\n".join(f"{turn.role}: {turn.content}" for turn in flat) or "(none)"
-        )
+        recent_content = "\n\n".join(f"{turn.role}: {turn.content}" for turn in flat) or "(none)"
         examples_trimmed = example_count < len(character.example_dialogues)
         layers = [
             ContextLayer(
@@ -134,9 +130,7 @@ def assemble_context(
                 tokenEstimate=estimate_tokens("\n".join(turn.content for turn in flat)),
                 trimmed=len(trimmed_turn_ids) > 0,
                 trimReason=(
-                    f"Removed {len(trimmed_turn_ids)} oldest turn(s)."
-                    if trimmed_turn_ids
-                    else None
+                    f"Removed {len(trimmed_turn_ids)} oldest turn(s)." if trimmed_turn_ids else None
                 ),
             ),
             ContextLayer(
@@ -225,9 +219,7 @@ def assemble_context(
 
 def persona_layer_present(layers: list[ContextLayer]) -> bool:
     persona = next((layer for layer in layers if layer.id == "persona"), None)
-    return bool(
-        persona and "Boundaries" in persona.content and persona.token_estimate > 0
-    )
+    return bool(persona and "Boundaries" in persona.content and persona.token_estimate > 0)
 
 
 def get_section_order() -> tuple[str, ...]:
