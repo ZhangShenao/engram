@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,14 +9,27 @@ for _parent in Path(__file__).resolve().parents:
         load_dotenv(_env_file)
         break
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from harness_service.orchestrator import TurnError, stream_turn
+from harness_service.llm.openrouter import open_llm_client
+from harness_service.orchestrator import TurnError, open_internal_client, stream_turn
 from harness_service.store import init_db, latest_inspection
 
-app = FastAPI(title="Engram Harness")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.http = open_internal_client()
+    app.state.llm = open_llm_client()
+    try:
+        yield
+    finally:
+        await app.state.http.aclose()
+        await app.state.llm.aclose()
+
+
+app = FastAPI(title="Engram Harness", lifespan=lifespan)
 init_db()
 
 SSE_HEADERS = {
@@ -39,8 +53,15 @@ def health():
 
 
 @app.post("/turns/stream")
-async def turns(body: TurnRequest):
-    generator = stream_turn(body.character_id, body.user_id, body.mode, body.message)
+async def turns(body: TurnRequest, request: Request):
+    generator = stream_turn(
+        body.character_id,
+        body.user_id,
+        body.mode,
+        body.message,
+        client=request.app.state.http,
+        llm_client=request.app.state.llm,
+    )
     try:
         # Surface lookup errors before the response is committed as a stream.
         first = await generator.__anext__()

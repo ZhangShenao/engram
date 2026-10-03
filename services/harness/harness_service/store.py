@@ -76,6 +76,14 @@ def save_inspection(character_id: str, user_id: str, session_id: str, payload: d
     return inspection_id
 
 
+def update_inspection(inspection_id: str, payload: dict) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE inspections SET payload_json = %s WHERE id = %s",
+            (json.dumps(payload), inspection_id),
+        )
+
+
 def latest_inspection(character_id: str, user_id: str) -> dict | None:
     with connect() as conn:
         row = conn.execute(

@@ -36,6 +36,7 @@ export function ChatPanel({ characterId }: { characterId: string }) {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const turnGen = useRef(0);
 
   const load = async () => {
     setLoading(true);
@@ -71,6 +72,7 @@ export function ChatPanel({ characterId }: { characterId: string }) {
     body: unknown,
     applyStart: (current: ChatMessage[]) => ChatMessage[]
   ) => {
+    const turn = ++turnGen.current;
     setTurnError(null);
     setStreaming(true);
     setMessages(applyStart);
@@ -86,6 +88,7 @@ export function ChatPanel({ characterId }: { characterId: string }) {
           );
         },
         onDone: (done) => {
+          if (turn !== turnGen.current) return;
           setProvider(done.provider ?? null);
           setMessages((current) =>
             current.map((message) =>
@@ -94,18 +97,30 @@ export function ChatPanel({ characterId }: { characterId: string }) {
                 : message
             )
           );
+          if (done.timings) {
+            setInspector((current) => (current ? { ...current, timings: done.timings } : current));
+          }
+          setStreaming(false);
         },
         onError: (message) => {
           failed = true;
           setTurnError(message);
         },
       });
-      if (!failed) await refresh();
+      if (!failed && turn === turnGen.current) {
+        await refresh();
+        try {
+          const inspection = await getInspector(characterId);
+          if (turn === turnGen.current) setInspector(inspection.inspector);
+        } catch {
+          // The reply is already on screen. Timings stay at the done-event snapshot.
+        }
+      }
     } catch (err) {
       failed = true;
       setTurnError(err instanceof Error ? err.message : "The turn failed.");
     } finally {
-      setStreaming(false);
+      if (turn === turnGen.current) setStreaming(false);
     }
     if (failed) {
       try {

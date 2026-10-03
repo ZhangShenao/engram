@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,6 +24,12 @@ from engram_contracts.models import CharacterInput
 from gateway_service.store import init_db, log_request
 
 logger = logging.getLogger("engram.gateway")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -49,6 +56,10 @@ def memory_url() -> str:
 
 def harness_url() -> str:
     return env_url("HARNESS_URL", "http://127.0.0.1:18414")
+
+
+def _elapsed_ms(start: float) -> int:
+    return max(0, int((time.perf_counter() - start) * 1000))
 
 
 async def bootstrap() -> None:
@@ -81,9 +92,20 @@ async def bootstrap() -> None:
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
-    await bootstrap()
-    yield
+async def lifespan(app: FastAPI):
+    app.state.http = httpx.AsyncClient(
+        timeout=None,
+        limits=httpx.Limits(
+            max_connections=100,
+            max_keepalive_connections=20,
+            keepalive_expiry=30.0,
+        ),
+    )
+    try:
+        await bootstrap()
+        yield
+    finally:
+        await app.state.http.aclose()
 
 
 app = FastAPI(title="Engram Gateway", lifespan=lifespan)
@@ -277,22 +299,46 @@ async def _proxy_turn(character_id: str, mode: str, message: str):
     }
 
     # Peek at the upstream status so a JSON error is not mislabeled as SSE.
-    client = httpx.AsyncClient(timeout=None)
-    request = client.build_request("POST", f"{harness_url()}/turns/stream", json=payload)
+    # The process-wide client keeps the harness connection warm across turns.
+    client = app.state.http
+    started = time.perf_counter()
+    request = client.build_request(
+        "POST",
+        f"{harness_url()}/turns/stream",
+        json=payload,
+        headers={"Accept-Encoding": "identity"},
+    )
     response = await client.send(request, stream=True)
+    headers_ms = _elapsed_ms(started)
     if response.status_code >= 400:
         body = await response.aread()
         await response.aclose()
-        await client.aclose()
+        logger.info(
+            "gateway turn character=%s mode=%s headers_ms=%s status=%s",
+            character_id,
+            mode,
+            headers_ms,
+            response.status_code,
+        )
         return Response(content=body, status_code=response.status_code, media_type="application/json")
 
     async def generate_open():
+        first_byte_ms: int | None = None
         try:
             async for chunk in response.aiter_bytes():
+                if first_byte_ms is None:
+                    first_byte_ms = _elapsed_ms(started)
                 yield chunk
         finally:
+            logger.info(
+                "gateway turn character=%s mode=%s headers_ms=%s first_byte_ms=%s total_ms=%s",
+                character_id,
+                mode,
+                headers_ms,
+                first_byte_ms,
+                _elapsed_ms(started),
+            )
             await response.aclose()
-            await client.aclose()
 
     return StreamingResponse(generate_open(), media_type="text/event-stream", headers=SSE_HEADERS)
 

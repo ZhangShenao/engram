@@ -10,6 +10,9 @@
 
 # testing
 /coverage
+.coverage
+coverage.json
+/reports/
 
 # next.js
 /.next/

@@ -149,18 +149,36 @@ def _run_regenerate(monkeypatch, messages, *, fail_replace=False, fail_discard=F
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr("harness_service.orchestrator.httpx.AsyncClient", FakeClient)
-    monkeypatch.setattr("harness_service.orchestrator.create_provider", lambda: provider)
+    monkeypatch.setattr("harness_service.orchestrator.create_provider", lambda *_args, **_kwargs: provider)
     monkeypatch.setattr("harness_service.orchestrator.save_inspection", lambda *args, **kwargs: None)
 
+    phase: list[str] = []
+
+    original_post = FakeClient.post
+
+    async def post(self, url, json=None):
+        if url.rstrip("/").endswith("/memories/extract"):
+            phase.append("extract")
+        return await original_post(self, url, json)
+
+    FakeClient.post = post
+
     async def collect():
-        return [chunk async for chunk in stream_turn("c1", "local", "regenerate", "")]
+        chunks = []
+        async for chunk in stream_turn("c1", "local", "regenerate", ""):
+            chunks.append(chunk)
+            if b'"type": "done"' in chunk:
+                phase.append("done")
+            if b'"type": "error"' in chunk:
+                phase.append("error")
+        return chunks
 
     events = _events(asyncio.run(collect()))
-    return calls, events, provider
+    return calls, events, provider, phase
 
 
 def test_continuation_regenerate_keeps_the_earlier_reply_and_replaces_atomically(monkeypatch):
-    calls, events, provider = _run_regenerate(monkeypatch, CONTINUATION)
+    calls, events, provider, phase = _run_regenerate(monkeypatch, CONTINUATION)
     contents = [message.content for message in provider.messages]
     assert any("The first reply stays." in content for content in contents)
     assert all("The continuation goes." not in content for content in contents)
@@ -175,20 +193,24 @@ def test_continuation_regenerate_keeps_the_earlier_reply_and_replaces_atomically
     assert not any(call[0] == "DELETE" for call in calls)
     assert events[-1]["type"] == "done"
     assert events[-1]["messageId"] == "a3"
+    assert phase.index("done") < phase.index("extract")
+    assert events[-1]["timings"]["extractMs"] is None
 
 
 def test_failed_replace_does_not_delete_the_old_reply_or_its_memories(monkeypatch):
-    calls, events, _provider = _run_regenerate(monkeypatch, CONTINUATION, fail_replace=True)
+    calls, events, _provider, phase = _run_regenerate(monkeypatch, CONTINUATION, fail_replace=True)
     assert events[-1]["type"] == "error"
     assert not any(call[1].endswith("/discard-turn") for call in calls)
     assert not any(call[1].endswith("/extract") for call in calls)
+    assert "extract" not in phase
     assert not any(call[0] == "DELETE" for call in calls)
 
 
 def test_discard_runs_before_extract_and_a_discard_failure_skips_extract(monkeypatch):
-    calls, events, _provider = _run_regenerate(monkeypatch, CONTINUATION, fail_discard=True)
+    calls, events, _provider, phase = _run_regenerate(monkeypatch, CONTINUATION, fail_discard=True)
     assert any(call[1].endswith("/messages/a2/replace") for call in calls)
     assert any(call[1].endswith("/discard-turn") for call in calls)
     assert not any(call[1].endswith("/extract") for call in calls)
+    assert "extract" not in phase
     assert events[-1]["type"] == "error"
     assert not any(call[0] == "DELETE" for call in calls)

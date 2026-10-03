@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from engram_contracts.models import MEMORY_TYPES, MemoryType
 
+from memory_service.domain.extractor import aclose_llm_client
 from memory_service.store import (
     active_memories,
     delete_for_character,
@@ -24,7 +26,15 @@ from memory_service.store import (
     update_memory,
 )
 
-app = FastAPI(title="Engram Memory")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        await aclose_llm_client()
+
+
+app = FastAPI(title="Engram Memory", lifespan=lifespan)
 init_db()
 
 

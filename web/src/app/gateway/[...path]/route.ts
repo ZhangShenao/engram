@@ -24,7 +24,8 @@ async function proxy(
   const responseHeaders = new Headers();
   const upstreamType = upstream.headers.get("content-type");
   if (upstreamType) responseHeaders.set("content-type", upstreamType);
-  responseHeaders.set("cache-control", "no-cache");
+  responseHeaders.set("cache-control", "no-cache, no-transform");
+  responseHeaders.set("x-accel-buffering", "no");
   return new Response(upstream.body, {
     status: upstream.status,
     headers: responseHeaders,

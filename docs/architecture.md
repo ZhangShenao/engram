@@ -103,30 +103,34 @@ Prompt 与裁剪代码：
 
 ## 3. 一轮聊天的同步请求路径
 
-`mode=chat`。浏览器通过 Next 同源代理访问 Gateway，Gateway 把 SSE 原样转给浏览器。
+`mode=chat`。浏览器通过 Next 同源代理访问 Gateway，Gateway 把 SSE 原样转给浏览器。逐步说明、流程图和时序图见 [chat-turn.md](chat-turn.md)。
+
+Gateway 到 Harness、Harness 到三个内部服务、Harness 到模型、Memory 到模型，各用进程内长期存活的 HTTP 客户端，连接在轮次之间复用。
 
 ```
 Web  POST /gateway/api/chats/{characterId}/stream  { message }
  └─ Gateway  POST harness /turns/stream
-      1. Character   GET  /characters/{id}
-      2. Conversation POST /sessions/ensure
-      3. Conversation POST /sessions/{id}/messages   （写入 user 消息）
-      4. Conversation GET  /sessions/{id}/messages   （verbatim 不含刚写入的这条 user）
-      5. Conversation GET  /sessions/{id}/summary
-      6. Memory      POST /memories/rank            （query = 本轮 user 文本）
-      7. Harness 本地 assemble_context
+      1. 并行：
+         Character    GET  /characters/{id}
+         Conversation POST /sessions/ensure
+         Memory       POST /memories/rank          （query = 本轮 user 文本）
+      2. 会话 id 到手后并行：
+         Conversation POST /sessions/{id}/messages （写入 user 消息，然后 GET 历史）
+         Conversation GET  /sessions/{id}/summary  （可与写入和读历史重叠）
+      3. Harness 本地 assemble_context
          （人设 / 记忆 / 摘要 / 最近 turn / reanchor / hint，超预算按第 7 节裁剪）
-      8. 写入 engram_harness 检查器快照，先把 inspector 事件推下去
-      9. OpenRouter 或脚本化 Provider 流式生成
-     10. Conversation POST /sessions/{id}/messages  （写入 assistant）
-     11. Memory       POST /memories/extract
-     12. 若 evictedTurns 非空：
+      4. 写入 engram_harness 检查器快照，先把 inspector 事件推下去
+      5. OpenRouter 或脚本化 Provider 流式生成
+      6. Conversation POST /sessions/{id}/messages （写入 assistant）
+      7. 若 evictedTurns 非空：
          Conversation POST /sessions/{id}/summary/append
          （只追加被挤出 verbatim 窗口的 turn 原文）
-     13. SSE done
+      8. SSE done（含编排、首字、生成耗时；extractMs 仍为空）
+      9. Memory POST /memories/extract
+         写回检查器快照里的 extractMs。浏览器已可开始下一轮
 ```
 
-`regenerate`：不新增 user 消息。最后一条必须是 assistant。若它的前一条也是 assistant（续写），prompt 保留更早的回复，只替换最后一条，发给模型的最新 user 行是续写指令。否则 verbatim 截到最后一条 user 之前，待替换的 assistant 不进入 prompt。新回复和删除旧回复在 Conversation 的一次事务里完成；事务失败时旧回复还在。替换成功后、提取新记忆之前，软删 `source_turn_id` 等于旧回复的记忆。
+`regenerate`：不新增 user 消息。最后一条必须是 assistant。若它的前一条也是 assistant（续写），prompt 保留更早的回复，只替换最后一条，发给模型的最新 user 行是续写指令。否则 verbatim 截到最后一条 user 之前，待替换的 assistant 不进入 prompt。新回复和删除旧回复在 Conversation 的一次事务里完成；事务失败时旧回复还在。替换成功后、SSE `done` 之前，软删 `source_turn_id` 等于旧回复的记忆。提取在 `done` 之后。角色卡和会话与摘要读取并行；排序要等历史确定 query 之后，再和仍在进行的摘要读取一起完成。
 
 `continue`：不落库续写指令，也不把该指令交给记忆提取。verbatim 为全部历史；发给模型的最后一条 user 是续写指令（不计入可裁剪窗口）。排序 query 用上一条真实 user 文本。新的 assistant 消息另起一条。
 
@@ -135,9 +139,11 @@ SSE 形状：
 ```
 data: {"type":"inspector","inspector":{...}}
 data: {"type":"chunk","text":"..."}
-data: {"type":"done","messageId":"...","content":"...","sessionId":"...","provider":"scripted|openrouter"}
-data: {"type":"error","message":"..."}
+data: {"type":"done","messageId":"...","content":"...","sessionId":"...","provider":"scripted|openrouter","timings":{"orchestrationMs":0,"modelFirstTokenMs":0,"modelTotalMs":0,"extractMs":null}}
+data: {"type":"error","message":"...","timings":{...}}
 ```
+
+`done` 到达时记忆提取还没开始。提取结束后，同一次检查器快照补上 `extractMs`。浏览器收到 `done` 就解锁输入；响应体关闭后再读一次检查器，上下文面板才显示提取耗时。
 
 ---
 
@@ -317,7 +323,7 @@ pytest
 
 覆盖裁剪顺序、人设保留、`evictedTurns`、记忆排序、槽位取代，以及 prompt 段落顺序。这些测试不启动进程、不需要 API 密钥。`OPENROUTER_API_KEY` 为空时走脚本化 Provider。
 
-CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑同一套 `pytest`。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_gateway`、`engram_character`、`engram_conversation`、`engram_memory`、`engram_harness`，并把五个服务的 `DATABASE_URL` 指到这些库。`OPENROUTER_API_KEY` 置空。随后在 `web/` 执行 `npm ci` 和 `npm run build`。不读取仓库密钥。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
+CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑 `scripts/quality_report.py`，再构建 `web/`。质量检查包含全部 `pytest`、语句覆盖率（不低于 65%）和代码重复率（不高于 5%）。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_gateway`、`engram_character`、`engram_conversation`、`engram_memory`、`engram_harness`，并把五个服务的 `DATABASE_URL` 指到这些库。`OPENROUTER_API_KEY` 置空。检查结束后，在对应的 pull request 上更新一条工程质量报告。不读取仓库密钥；评论使用 Actions 自带的 `GITHUB_TOKEN`。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
 
 ---
 
