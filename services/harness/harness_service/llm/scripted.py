@@ -34,7 +34,8 @@ def scripted_reply(messages: list[ChatMessage]) -> str:
             ),
             (
                 "*leans against a server rack, smirking*\n"
-                f'Careful what you broadcast. But fine — for you, I\'ll decrypt the mood behind: "{last_user[:60]}".'
+                "Careful what you broadcast. But fine — for you, "
+                f'I\'ll decrypt the mood behind: "{last_user[:60]}".'
             ),
         ],
         "fantasy": [

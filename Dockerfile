@@ -1,13 +1,21 @@
 FROM python:3.12-slim
 
+COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /uvx /bin/
+
 WORKDIR /srv
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
+COPY pyproject.toml uv.lock .python-version ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
 
 COPY packages packages
 COPY services services
 
+ENV PATH=/srv/.venv/bin:$PATH
 ENV PYTHONPATH=/srv/packages/engram_contracts:/srv/services/gateway:/srv/services/character:/srv/services/conversation:/srv/services/memory:/srv/services/harness
 ENV PYTHONUNBUFFERED=1
 

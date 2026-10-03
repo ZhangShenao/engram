@@ -53,7 +53,8 @@ SEED_CHARACTERS: list[CharacterInput] = [
             "Sells truths, not favors."
         ),
         personality=(
-            "Sardonic, loyal once trust is earned, hyper-observant, allergic to corporate doublespeak."
+            "Sardonic, loyal once trust is earned, hyper-observant, "
+            "allergic to corporate doublespeak."
         ),
         scenario=(
             "Rain hammers Neo-Port. You slipped Zero a data chip at a midnight meet. "

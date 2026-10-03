@@ -1,7 +1,6 @@
 import asyncio
 
 from engram_contracts.models import ChatMessage
-
 from harness_service.llm.openrouter import OpenRouterProvider
 
 
@@ -35,7 +34,9 @@ class _Client:
 
 
 async def _collect(provider: OpenRouterProvider) -> list[str]:
-    return [chunk async for chunk in provider.iter_chunks([ChatMessage(role="user", content="Hello")])]
+    return [
+        chunk async for chunk in provider.iter_chunks([ChatMessage(role="user", content="Hello")])
+    ]
 
 
 def test_chat_stream_is_not_gzip_compressed_and_prefers_low_latency():

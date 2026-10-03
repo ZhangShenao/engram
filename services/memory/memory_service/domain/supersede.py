@@ -1,5 +1,4 @@
 from engram_contracts.models import MemoryCandidate, MemoryRecord
-
 from memory_service.domain.slots import infer_memory_slot
 
 
@@ -34,9 +33,7 @@ def apply_supersede(
     for memory in records:
         if memory.id == superseded_id:
             updated.append(
-                memory.model_copy(
-                    update={"superseded_by_id": new_id, "updated_at": updated_at}
-                )
+                memory.model_copy(update={"superseded_by_id": new_id, "updated_at": updated_at})
             )
         else:
             updated.append(memory)

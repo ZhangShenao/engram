@@ -149,8 +149,12 @@ def _run_regenerate(monkeypatch, messages, *, fail_replace=False, fail_discard=F
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr("harness_service.orchestrator.httpx.AsyncClient", FakeClient)
-    monkeypatch.setattr("harness_service.orchestrator.create_provider", lambda *_args, **_kwargs: provider)
-    monkeypatch.setattr("harness_service.orchestrator.save_inspection", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "harness_service.orchestrator.create_provider", lambda *_args, **_kwargs: provider
+    )
+    monkeypatch.setattr(
+        "harness_service.orchestrator.save_inspection", lambda *args, **kwargs: None
+    )
 
     phase: list[str] = []
 
@@ -185,7 +189,9 @@ def test_continuation_regenerate_keeps_the_earlier_reply_and_replaces_atomically
     assert contents[-1] == CONTINUE_INSTRUCTION
     posts = [call for call in calls if call[0] == "POST"]
     replace_at = next(index for index, call in enumerate(posts) if call[1].endswith("/replace"))
-    discard_at = next(index for index, call in enumerate(posts) if call[1].endswith("/discard-turn"))
+    discard_at = next(
+        index for index, call in enumerate(posts) if call[1].endswith("/discard-turn")
+    )
     extract_at = next(index for index, call in enumerate(posts) if call[1].endswith("/extract"))
     assert replace_at < discard_at < extract_at
     assert posts[replace_at][1].endswith("/messages/a2/replace")

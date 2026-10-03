@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from engram_contracts.models import CharacterCard, MemoryRecord
-
 from harness_service.persona.stability import (
     OUTPUT_SHAPE_INSTRUCTION,
     REANCHOR_INSTRUCTION,

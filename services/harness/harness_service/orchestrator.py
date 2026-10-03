@@ -110,11 +110,7 @@ def timings_payload(
     if extract_ms is not None:
         recorded["extract"] = extract_ms
     known = [{"name": name, "ms": recorded[name]} for name in STAGE_ORDER if name in recorded]
-    extra = [
-        {"name": name, "ms": recorded[name]}
-        for name in recorded
-        if name not in STAGE_ORDER
-    ]
+    extra = [{"name": name, "ms": recorded[name]} for name in recorded if name not in STAGE_ORDER]
     return {
         "orchestrationMs": _elapsed_ms(started, orchestration_end),
         "modelFirstTokenMs": recorded.get("modelFirstToken"),
@@ -204,16 +200,12 @@ async def _ensure_session(client: httpx.AsyncClient, character_id: str, user_id:
 
 
 async def _load_messages(client: httpx.AsyncClient, session_id: str) -> list[dict]:
-    payload = await _json(
-        await client.get(f"{conversation_url()}/sessions/{session_id}/messages")
-    )
+    payload = await _json(await client.get(f"{conversation_url()}/sessions/{session_id}/messages"))
     return payload["messages"]
 
 
 async def _load_summary(client: httpx.AsyncClient, session_id: str) -> str:
-    payload = await _json(
-        await client.get(f"{conversation_url()}/sessions/{session_id}/summary")
-    )
+    payload = await _json(await client.get(f"{conversation_url()}/sessions/{session_id}/summary"))
     return payload.get("summary") or ""
 
 
@@ -292,9 +284,7 @@ async def _prepare_turn(
     )
     spans["prefetch"] = _elapsed_ms(prefetch_started, time.perf_counter())
     context_started = time.perf_counter()
-    summary_task = asyncio.create_task(
-        _span(spans, "summary", _load_summary(client, session_id))
-    )
+    summary_task = asyncio.create_task(_span(spans, "summary", _load_summary(client, session_id)))
     try:
         history_all = await _span(spans, "readHistory", _load_messages(client, session_id))
         if mode == "regenerate":
@@ -431,7 +421,13 @@ async def _stream_turn(
             timings = current_timings(None)
             _store_timings(inspection_id, inspector, timings)
             _log_timings(mode, timings)
-            yield sse({"type": "error", "message": "The model returned an empty reply.", "timings": timings})
+            yield sse(
+                {
+                    "type": "error",
+                    "message": "The model returned an empty reply.",
+                    "timings": timings,
+                }
+            )
             return
         if replace_message_id:
 
@@ -503,9 +499,7 @@ async def _stream_turn(
         timings = current_timings(None)
         _store_timings(inspection_id, inspector, timings)
         _log_timings(mode, timings)
-        yield sse(
-            {"type": "error", "message": str(exc) or "Stream failed", "timings": timings}
-        )
+        yield sse({"type": "error", "message": str(exc) or "Stream failed", "timings": timings})
         return
 
     extract_user = "" if mode == "continue" else rank_query

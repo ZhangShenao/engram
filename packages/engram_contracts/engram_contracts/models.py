@@ -25,9 +25,7 @@ class CharacterInput(BaseModel):
     description: str = ""
     personality: str = ""
     scenario: str = ""
-    example_dialogues: list[ExampleDialogue] = Field(
-        default_factory=list, alias="exampleDialogues"
-    )
+    example_dialogues: list[ExampleDialogue] = Field(default_factory=list, alias="exampleDialogues")
     greeting: str = ""
     speech_style: str = Field(default="", alias="speechStyle")
     boundaries: str = ""

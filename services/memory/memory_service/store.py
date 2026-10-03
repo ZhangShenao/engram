@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from psycopg.rows import dict_row
 
 from engram_contracts.models import MemoryRecord, MemoryType
-
 from memory_service.domain.extractor import create_extractor
 from memory_service.domain.rank import rank_memories
 from memory_service.domain.slots import normalize_slot
@@ -194,9 +193,7 @@ async def extract_and_store(
                 mark_superseded(conn, superseded.id, memory_id)
                 for index, memory in enumerate(existing):
                     if memory.id == superseded.id:
-                        existing[index] = memory.model_copy(
-                            update={"superseded_by_id": memory_id}
-                        )
+                        existing[index] = memory.model_copy(update={"superseded_by_id": memory_id})
                         break
             existing.append(record)
             created.append(record)

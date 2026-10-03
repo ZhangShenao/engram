@@ -18,8 +18,7 @@ from engram_contracts.constants import (
     OPENROUTER_REFERER,
     OPENROUTER_TITLE,
 )
-from engram_contracts.models import MEMORY_TYPES, MemoryCandidate, MemoryType
-
+from engram_contracts.models import MEMORY_TYPES, MemoryCandidate
 from memory_service.domain.slots import MEMORY_SLOTS, normalize_slot
 
 

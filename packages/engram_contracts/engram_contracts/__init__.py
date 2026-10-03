@@ -1,5 +1,12 @@
 """Shared API contracts. Algorithms live in the owning service."""
 
+from engram_contracts.constants import (
+    DEFAULT_MODEL_ID,
+    LOCAL_USER_ID,
+    OPENROUTER_BASE_URL,
+    OPENROUTER_REFERER,
+    OPENROUTER_TITLE,
+)
 from engram_contracts.models import (
     MEMORY_TYPES,
     AssembledContext,
@@ -12,13 +19,6 @@ from engram_contracts.models import (
     MemoryRecord,
     MemoryType,
     VerbatimTurn,
-)
-from engram_contracts.constants import (
-    DEFAULT_MODEL_ID,
-    LOCAL_USER_ID,
-    OPENROUTER_BASE_URL,
-    OPENROUTER_REFERER,
-    OPENROUTER_TITLE,
 )
 
 __all__ = [

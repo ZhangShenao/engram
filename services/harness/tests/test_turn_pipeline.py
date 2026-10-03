@@ -137,7 +137,9 @@ def test_chat_overlaps_prefetch_and_extracts_after_done(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr("harness_service.orchestrator.httpx.AsyncClient", FakeClient)
-    monkeypatch.setattr("harness_service.orchestrator.create_provider", lambda *_a, **_k: _Provider())
+    monkeypatch.setattr(
+        "harness_service.orchestrator.create_provider", lambda *_a, **_k: _Provider()
+    )
     monkeypatch.setattr("harness_service.orchestrator.save_inspection", save)
     monkeypatch.setattr("harness_service.orchestrator.update_inspection", update)
 
@@ -193,7 +195,9 @@ def test_stream_turn_keeps_the_provided_client(monkeypatch):
         raise AssertionError("opened a new HTTP client")
 
     monkeypatch.setattr("harness_service.orchestrator.httpx.AsyncClient", boom)
-    monkeypatch.setattr("harness_service.orchestrator.create_provider", lambda *_a, **_k: _Provider())
+    monkeypatch.setattr(
+        "harness_service.orchestrator.create_provider", lambda *_a, **_k: _Provider()
+    )
     monkeypatch.setattr("harness_service.orchestrator.save_inspection", lambda *_a, **_k: None)
 
     client = _Reusable()
@@ -322,9 +326,7 @@ def test_regenerate_discards_only_after_the_replaced_reply_extract(monkeypatch):
     monkeypatch.setattr(
         "harness_service.orchestrator.create_provider", lambda *_a, **_k: _Provider()
     )
-    monkeypatch.setattr(
-        "harness_service.orchestrator.save_inspection", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr("harness_service.orchestrator.save_inspection", lambda *_a, **_k: None)
     client = Client()
 
     async def consume_chat():
@@ -333,7 +335,9 @@ def test_regenerate_discards_only_after_the_replaced_reply_extract(monkeypatch):
                 done_seen.set()
 
     async def consume_regen():
-        return [chunk async for chunk in stream_turn("c1", "local", "regenerate", "", client=client)]
+        return [
+            chunk async for chunk in stream_turn("c1", "local", "regenerate", "", client=client)
+        ]
 
     async def scenario():
         chat_task = asyncio.create_task(consume_chat())

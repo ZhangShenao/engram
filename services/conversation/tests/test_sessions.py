@@ -9,7 +9,6 @@ from psycopg.rows import dict_row
 from conversation_service.main import app
 from conversation_service.store import (
     add_message,
-    connect,
     database_url,
     delete_by_character,
     ensure_session,

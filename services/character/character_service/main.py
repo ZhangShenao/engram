@@ -10,8 +10,6 @@ for _parent in Path(__file__).resolve().parents:
 
 from fastapi import FastAPI, HTTPException
 
-from engram_contracts.models import CharacterInput
-
 from character_service.seed import SEED_CHARACTERS
 from character_service.store import (
     count_characters,
@@ -22,6 +20,7 @@ from character_service.store import (
     list_characters,
     update_character,
 )
+from engram_contracts.models import CharacterInput
 
 app = FastAPI(title="Engram Character")
 init_db()

@@ -93,13 +93,13 @@ run_local() {
   export HARNESS_DATABASE_URL="${HARNESS_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_harness}"
   export GATEWAY_DATABASE_URL="${GATEWAY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_gateway}"
 
-  if [[ ! -x .venv/bin/python ]]; then
-    rm -rf .venv
-    python3 -m venv .venv
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv is not installed. See https://docs.astral.sh/uv/getting-started/installation/" >&2
+    exit 1
   fi
+  uv sync --frozen --quiet
   # shellcheck disable=SC1091
   source .venv/bin/activate
-  python -m pip install -q -r requirements.txt
 
   if [[ ! -d web/node_modules ]]; then
     npm --prefix web install

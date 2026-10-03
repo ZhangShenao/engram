@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from engram_contracts.models import CharacterCard, ExampleDialogue, MemoryRecord, VerbatimTurn
@@ -79,7 +79,7 @@ def test_lists_evicted_turns_in_order():
 
 
 def test_records_trim_on_budget_overflow():
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     memories = [
         MemoryRecord(
             id=f"m{index}",
@@ -110,7 +110,7 @@ def test_records_trim_on_budget_overflow():
 
 
 def _memory(memory_id: str, text: str, salience: float) -> MemoryRecord:
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     return MemoryRecord(
         id=memory_id,
         characterId="c1",

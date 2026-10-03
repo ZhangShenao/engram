@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from engram_contracts.models import MemoryRecord
 from memory_service.domain.rank import rank_memories, relevance_score
 
 
 def mem(**partial) -> MemoryRecord:
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     data = {
         "id": partial.pop("id"),
         "characterId": "c",
@@ -38,7 +38,7 @@ def test_ranks_higher_salience_and_relevance():
 def test_excludes_deleted_and_superseded():
     ranked = rank_memories(
         [
-            mem(id="1", deletedAt=datetime.now(timezone.utc).isoformat()),
+            mem(id="1", deletedAt=datetime.now(UTC).isoformat()),
             mem(id="2", supersededById="x"),
             mem(id="3", text="active"),
         ],

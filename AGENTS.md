@@ -67,23 +67,53 @@ Phase 1 只有一个槽位：`user_name`。
 3. 聊天和记忆提取都保留 `HTTP-Referer` 和 `X-Title: Engram`。
 4. 保留无密钥路径：Harness 用 `ScriptedLLMProvider`，Memory 用 `DeterministicMemoryExtractor`。
 
-## 测试和本地运行
+## 依赖和测试
 
-在仓库根目录、虚拟环境已激活时：
+后端依赖用 uv 管理。运行时依赖写在 `pyproject.toml` 的 `[project].dependencies`，pytest、ruff、pre-commit 这类开发工具写在 `dev` 依赖组。`uv.lock` 锁定全部版本，必须提交。不要再加 `requirements.txt`，也不要用 `pip install`。
 
 ```bash
-pytest
+uv sync                  # 按 uv.lock 建或更新 .venv
+uv add <package>         # 加运行时依赖
+uv add --dev <package>   # 加开发工具
 ```
 
-`OPENROUTER_API_KEY` 留空，这样走脚本化 Provider。CI 用 PostgreSQL 16 和五个服务库跑质量检查，然后构建 `web/`。
+改了依赖就把 `pyproject.toml` 和 `uv.lock` 一起提交。CI 和 Docker 镜像都用 `uv sync --frozen`，锁文件过期会直接失败。
 
-质量检查是 `python scripts/quality_report.py`。它跑全部 pytest，并加上两道门禁：语句覆盖率不低于 65%，代码重复率不高于 5%。覆盖率统计五个服务和 `engram_contracts`。重复率用 jscpd，扫 `services/`、`packages/` 和 `web/src`，至少 8 行、50 个 token 才计一处。报告写在 `reports/quality.md`，这个目录不提交。
+在仓库根目录：
+
+```bash
+uv run pytest
+```
+
+`OPENROUTER_API_KEY` 留空，这样走脚本化 Provider。CI 用 PostgreSQL 16 和五个服务库跑 lint 和质量检查，然后构建 `web/`。
+
+质量检查是 `uv run python scripts/quality_report.py`。它跑全部 pytest，并加上三道门禁：语句覆盖率不低于 65%，代码重复率不高于 5%，`ruff check` 和 `ruff format --check` 没有问题。覆盖率统计五个服务和 `engram_contracts`。重复率用 jscpd，扫 `services/`、`packages/` 和 `web/src`，至少 8 行、50 个 token 才计一处。报告写在 `reports/quality.md`，这个目录不提交。
+
+## Lint 和格式化
+
+Python 用 ruff 做 lint 和格式化，配置在 `pyproject.toml`：行宽 100，目标 Python 3.12，含 import 排序。Web 用现有的 ESLint 配置。
+
+`git commit` 前由 pre-commit 自动检查，配置在 `.pre-commit-config.yaml`。每个克隆装一次钩子，所有 worktree 共用：
+
+```bash
+uv run pre-commit install
+```
+
+钩子会修尾随空格和文件末尾换行，检查 YAML、TOML、JSON，检查 `uv.lock` 和 `pyproject.toml` 一致，对暂存的 Python 文件跑 `ruff check --fix` 和 `ruff format`，`web/src` 有改动时跑 ESLint。钩子改了文件，提交会中止；检查改动后重新 `git add` 再提交。不要用 `--no-verify` 跳过。
+
+```bash
+uv run pre-commit run --all-files   # 和 CI 一样跑全部钩子
+```
+
+CI 的 `ci` 任务先跑同一套 pre-commit 钩子，质量报告里也有一行“代码规范”。任一处不过，`ci` 失败。
+
+## 本地运行
 
 ```bash
 ./scripts/dev.sh
 ```
 
-有 Docker 时它用 Docker Compose 构建并启动整套服务，等所有容器健康后返回；`./scripts/dev.sh logs` 看日志，`./scripts/dev.sh down` 停止。没有 Docker，或用 `./scripts/dev.sh local`，则在本机进程里跑。本机 5432 已被占用时，设置 `POSTGRES_PORT` 换一个宿主端口。
+有 Docker 时它用 Docker Compose 构建并启动整套服务，等所有容器健康后返回；`./scripts/dev.sh logs` 看日志，`./scripts/dev.sh down` 停止。没有 Docker，或用 `./scripts/dev.sh local`，则在本机进程里跑，这时需要先装好 uv，脚本会执行 `uv sync --frozen`。本机 5432 已被占用时，设置 `POSTGRES_PORT` 换一个宿主端口。
 
 Web 在 http://127.0.0.1:18415。不要占用 3000、5173、8080 或 43123。
 
