@@ -5,6 +5,7 @@ import type {
   ChatSummary,
   Inspector,
   Memory,
+  TurnTimings,
 } from "./types";
 
 async function parseError(response: Response, fallback: string) {
@@ -92,7 +93,12 @@ export function getInspector(characterId: string) {
 export interface StreamHandlers {
   onInspector?: (inspector: Inspector) => void;
   onChunk?: (text: string) => void;
-  onDone?: (payload: { messageId: string; content: string; provider?: string }) => void;
+  onDone?: (payload: {
+    messageId: string;
+    content: string;
+    provider?: string;
+    timings?: TurnTimings;
+  }) => void;
   onError?: (message: string) => void;
 }
 
@@ -125,6 +131,7 @@ export async function streamTurn(path: string, body: unknown, handlers: StreamHa
         messageId?: string;
         content?: string;
         provider?: string;
+        timings?: TurnTimings;
         error?: string;
       };
       if (payload.type === "inspector" && payload.inspector) {
@@ -136,6 +143,7 @@ export async function streamTurn(path: string, body: unknown, handlers: StreamHa
           messageId: payload.messageId,
           content: payload.content ?? "",
           provider: payload.provider,
+          timings: payload.timings,
         });
       } else if (payload.type === "error") {
         handlers.onError?.(payload.message || "The turn failed.");

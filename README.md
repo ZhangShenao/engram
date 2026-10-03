@@ -89,4 +89,4 @@ Included: character cards, streaming chat, regenerate, continue, typed memories 
 
 Not included: voice, image generation, auth, social feed, native apps, embeddings, group chat, or Kubernetes.
 
-Architecture (Chinese): [docs/architecture.md](docs/architecture.md).
+Architecture (Chinese): [docs/architecture.md](docs/architecture.md). One chat turn: [docs/chat-turn.md](docs/chat-turn.md).

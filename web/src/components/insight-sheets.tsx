@@ -12,7 +12,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { deleteMemory, listMemories, saveMemory } from "@/lib/api";
-import { MEMORY_TYPES, type Inspector, type Memory, type MemoryType } from "@/lib/types";
+import { MEMORY_TYPES, type Inspector, type Memory, type MemoryType, type TurnTimings } from "@/lib/types";
 
 export function MemorySheet({
   characterId,
@@ -158,6 +158,53 @@ export function MemorySheet({
   );
 }
 
+function formatMs(value: number | null) {
+  if (value == null) return "—";
+  return `${value} ms`;
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  character: "Character card",
+  session: "Session",
+  rank: "Memory rank",
+  prefetch: "Prefetch, wall",
+  writeUser: "Write user message",
+  readHistory: "Read history",
+  summary: "Read summary",
+  contextLoad: "Context load, wall",
+  assemble: "Assemble prompt",
+  saveInspection: "Save inspector",
+  modelFirstToken: "Model, first token",
+  modelTotal: "Model, full reply",
+  saveAssistant: "Save assistant",
+  replaceAssistant: "Replace assistant",
+  discardMemories: "Discard old memories",
+  summaryAppend: "Append summary",
+  extract: "Memory extract",
+};
+
+function TurnTimingsList({ timings }: { timings: TurnTimings }) {
+  const rows =
+    timings.stages && timings.stages.length > 0
+      ? timings.stages.map((stage) => [STAGE_LABELS[stage.name] ?? stage.name, formatMs(stage.ms)] as const)
+      : ([
+          ["Before the model", formatMs(timings.orchestrationMs)],
+          ["Model, first token", formatMs(timings.modelFirstTokenMs)],
+          ["Model, full reply", formatMs(timings.modelTotalMs)],
+          ["Memory extract", formatMs(timings.extractMs)],
+        ] as const);
+  return (
+    <dl className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-xl border border-border px-3 py-2 text-xs">
+      {rows.map(([label, value]) => (
+        <div key={label} className="contents">
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="text-right font-mono text-foreground/90">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 export function InspectorSheet({
   open,
   onOpenChange,
@@ -190,6 +237,7 @@ export function InspectorSheet({
                 </Badge>
                 {inspector.trimLog.length > 0 && <Badge variant="outline">Trimmed this turn</Badge>}
               </div>
+              {inspector.timings && <TurnTimingsList timings={inspector.timings} />}
               {inspector.trimLog.length > 0 && (
                 <ul className="list-disc space-y-1 pl-4 text-xs text-amber-200/90">
                   {inspector.trimLog.map((entry, index) => (

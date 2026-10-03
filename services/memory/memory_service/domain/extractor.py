@@ -127,6 +127,30 @@ def _parse_candidates(raw: str) -> list[MemoryCandidate]:
     return candidates
 
 
+_llm_client: httpx.AsyncClient | None = None
+
+
+def llm_http_client() -> httpx.AsyncClient:
+    global _llm_client
+    if _llm_client is None or _llm_client.is_closed:
+        _llm_client = httpx.AsyncClient(
+            timeout=60,
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30.0,
+            ),
+        )
+    return _llm_client
+
+
+async def aclose_llm_client() -> None:
+    global _llm_client
+    if _llm_client is not None and not _llm_client.is_closed:
+        await _llm_client.aclose()
+    _llm_client = None
+
+
 class LLMMemoryExtractor:
     async def extract(self, user_message: str, assistant_message: str) -> list[MemoryCandidate]:
         api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
@@ -143,28 +167,27 @@ class LLMMemoryExtractor:
             '- If nothing to store, return {"memories":[]}.'
         )
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    f"{base}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": OPENROUTER_REFERER,
-                        "X-Title": OPENROUTER_TITLE,
-                    },
-                    json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {
-                                "role": "user",
-                                "content": f"User: {user_message}\nAssistant: {assistant_message}",
-                            },
-                        ],
-                        "temperature": 0.2,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
+            response = await llm_http_client().post(
+                f"{base}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": OPENROUTER_REFERER,
+                    "X-Title": OPENROUTER_TITLE,
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {
+                            "role": "user",
+                            "content": f"User: {user_message}\nAssistant: {assistant_message}",
+                        },
+                    ],
+                    "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
+                },
+            )
         except httpx.HTTPError:
             return []
         if response.status_code >= 400:

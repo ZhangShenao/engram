@@ -55,11 +55,25 @@ export interface ContextLayer {
   trimReason?: string | null;
 }
 
+export interface TurnStage {
+  name: string;
+  ms: number;
+}
+
+export interface TurnTimings {
+  orchestrationMs: number;
+  modelFirstTokenMs: number | null;
+  modelTotalMs: number | null;
+  extractMs: number | null;
+  stages?: TurnStage[];
+}
+
 export interface Inspector {
   layers: ContextLayer[];
   trimLog: string[];
   totalTokens: number;
   budget: number;
+  timings?: TurnTimings | null;
 }
 
 export interface Memory {
