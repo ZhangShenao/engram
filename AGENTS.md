@@ -75,7 +75,9 @@ Phase 1 只有一个槽位：`user_name`。
 pytest
 ```
 
-`OPENROUTER_API_KEY` 留空，这样走脚本化 Provider。CI 用 PostgreSQL 16 和五个服务库跑同一套 `pytest`，然后构建 `web/`。
+`OPENROUTER_API_KEY` 留空，这样走脚本化 Provider。CI 用 PostgreSQL 16 和五个服务库跑质量检查，然后构建 `web/`。
+
+质量检查是 `python scripts/quality_report.py`。它跑全部 pytest，并加上两道门禁：语句覆盖率不低于 65%，代码重复率不高于 5%。覆盖率统计五个服务和 `engram_contracts`。重复率用 jscpd，扫 `services/`、`packages/` 和 `web/src`，至少 8 行、50 个 token 才计一处。报告写在 `reports/quality.md`，这个目录不提交。
 
 ```bash
 ./scripts/dev.sh
@@ -87,6 +89,6 @@ Web 在 http://127.0.0.1:18415。不要占用 3000、5173、8080 或 43123。
 
 1. 分支从更新后的 `main` 拉出，放在独立 worktree 里。不要把提交直接推到 `main`。规则集禁止直接推送、强推和删除，没有旁路。
 2. 开 pull request。模板要求摘要、如何测试，以及检查清单。
-3. CI（`.github/workflows/ci.yml`）必须通过。必需检查的名字是 `ci`。分支要和 `main` 保持同步。工作流会取消被取代的运行，不需要密钥。
+3. CI（`.github/workflows/ci.yml`）必须通过。必需检查的名字是 `ci`。分支要和 `main` 保持同步。工作流会取消被取代的运行，不需要仓库密钥；评论用自带的 `GITHUB_TOKEN`。每次检查结束后，在对应的 pull request 上更新一条工程质量报告。推送到 `main` 时，报告写到产生这次推送的 pull request 上；没有关联的 pull request 时，报告留在该次 Actions 的摘要里。门禁不过，`ci` 失败。
 4. 不要提交 `.env`。
 5. `ci` 变绿之后再合并。

@@ -77,7 +77,7 @@ Tests cover trim order, persona retention, evicted turns, memory rank, slot supe
 
 ## Git workflow
 
-Branch from `main` and open a pull request. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It cancels a run when a newer commit supersedes it. The job starts PostgreSQL 16, creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness` from [`scripts/init-postgres.sql`](scripts/init-postgres.sql), then runs `pytest` with those service `DATABASE_URL`s and an empty `OPENROUTER_API_KEY`. It then runs `npm ci` and `npm run build` in `web/`. No repository secrets are required.
+Branch from `main` and open a pull request. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It cancels a run when a newer commit supersedes it. The job starts PostgreSQL 16, creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness` from [`scripts/init-postgres.sql`](scripts/init-postgres.sql), then runs [`scripts/quality_report.py`](scripts/quality_report.py) with those service `DATABASE_URL`s and an empty `OPENROUTER_API_KEY`. That script runs `pytest` and fails the job when statement coverage is under 65% or duplicated lines are over 5%. It then runs `npm ci` and `npm run build` in `web/`. No repository secrets are required. When the job finishes, it updates one quality-report comment on the pull request.
 
 `main` rejects direct pushes, including from admins. Changes land through a pull request, and the `ci` check must pass before merge. The branch must be up to date with `main`.
 

@@ -323,7 +323,7 @@ pytest
 
 覆盖裁剪顺序、人设保留、`evictedTurns`、记忆排序、槽位取代，以及 prompt 段落顺序。这些测试不启动进程、不需要 API 密钥。`OPENROUTER_API_KEY` 为空时走脚本化 Provider。
 
-CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑同一套 `pytest`。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_gateway`、`engram_character`、`engram_conversation`、`engram_memory`、`engram_harness`，并把五个服务的 `DATABASE_URL` 指到这些库。`OPENROUTER_API_KEY` 置空。随后在 `web/` 执行 `npm ci` 和 `npm run build`。不读取仓库密钥。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
+CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑 `scripts/quality_report.py`，再构建 `web/`。质量检查包含全部 `pytest`、语句覆盖率（不低于 65%）和代码重复率（不高于 5%）。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_gateway`、`engram_character`、`engram_conversation`、`engram_memory`、`engram_harness`，并把五个服务的 `DATABASE_URL` 指到这些库。`OPENROUTER_API_KEY` 置空。检查结束后，在对应的 pull request 上更新一条工程质量报告。不读取仓库密钥；评论使用 Actions 自带的 `GITHUB_TOKEN`。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
 
 ---
 
