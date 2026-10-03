@@ -1,0 +1,43 @@
+# Smoke configuration for the walkthrough in docs/model-training.
+# Copy this file outside the repo before a real run, and point `data` at a
+# directory that contains your own train.jsonl and valid.jsonl.
+# Flags here follow mlx-lm's examples/lora_config.yaml.
+
+model: "mlx-community/Qwen2.5-14B-Instruct-4bit"
+train: true
+fine_tune_type: lora
+optimizer: adamw
+
+# Replace this with the directory that holds train.jsonl and valid.jsonl.
+data: "docs/model-training/examples"
+
+seed: 0
+
+# Last 16 of Qwen2.5-14B's 48 layers. Raise toward 48 only after a run fits.
+num_layers: 16
+
+batch_size: 1
+# One pass over the 8 smoke rows. A real set should set iters near the row count.
+iters: 8
+val_batches: -1
+# Upstream mlx-lm example uses 1e-5. 1e-4 is a common LoRA starting point.
+# If the loss jumps around, change this to 1.0e-5.
+learning_rate: 1.0e-4
+
+steps_per_report: 1
+steps_per_eval: 4
+grad_accumulation_steps: 1
+
+adapter_path: "adapters/engram-smoke"
+save_every: 4
+test: false
+max_seq_length: 2048
+grad_checkpoint: true
+
+# MLX-only block. `scale` multiplies the low-rank update.
+# The upstream example pairs rank 8 with scale 20. Keep the pair on the first run.
+lora_parameters:
+  keys: ["self_attn.q_proj", "self_attn.v_proj"]
+  rank: 8
+  scale: 20.0
+  dropout: 0.0

@@ -90,3 +90,5 @@ Included: character cards, streaming chat, regenerate, continue, typed memories 
 Not included: voice, image generation, auth, social feed, native apps, embeddings, group chat, or Kubernetes.
 
 Architecture (Chinese): [docs/architecture.md](docs/architecture.md).
+
+Notes for training a local roleplay model on an Apple-silicon Mac, written for this harness: [docs/model-training/README.md](docs/model-training/README.md).
