@@ -76,17 +76,22 @@ run_local() {
     set +a
   fi
 
+  local pg_port=5432
+  if docker_ready; then
+    pg_port="$(compose_postgres_port)"
+  fi
+
   export WEB_ORIGIN="${WEB_ORIGIN:-http://127.0.0.1:18415}"
   export GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:18410}"
   export CHARACTER_URL="${CHARACTER_URL:-http://127.0.0.1:18411}"
   export CONVERSATION_URL="${CONVERSATION_URL:-http://127.0.0.1:18412}"
   export MEMORY_URL="${MEMORY_URL:-http://127.0.0.1:18413}"
   export HARNESS_URL="${HARNESS_URL:-http://127.0.0.1:18414}"
-  export CHARACTER_DATABASE_URL="${CHARACTER_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_character}"
-  export CONVERSATION_DATABASE_URL="${CONVERSATION_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_conversation}"
-  export MEMORY_DATABASE_URL="${MEMORY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_memory}"
-  export HARNESS_DATABASE_URL="${HARNESS_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_harness}"
-  export GATEWAY_DATABASE_URL="${GATEWAY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_gateway}"
+  export CHARACTER_DATABASE_URL="${CHARACTER_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_character}"
+  export CONVERSATION_DATABASE_URL="${CONVERSATION_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_conversation}"
+  export MEMORY_DATABASE_URL="${MEMORY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_memory}"
+  export HARNESS_DATABASE_URL="${HARNESS_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_harness}"
+  export GATEWAY_DATABASE_URL="${GATEWAY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_gateway}"
 
   if [[ ! -x .venv/bin/python ]]; then
     rm -rf .venv
