@@ -43,6 +43,10 @@ __pycache__/
 *.pyc
 logs/
 
+# local MLX adapters and fused weights (docs/model-training)
+/adapters/
+/fused_model/
+
 # web app
 /web/node_modules/
 /web/.next/
