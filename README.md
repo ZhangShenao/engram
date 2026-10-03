@@ -21,23 +21,19 @@ Lyra, Zero, and Mara are seeded on an empty character database, with their greet
 
 ## Run locally
 
-Requirements: Python 3.12, Node.js 20+, npm. PostgreSQL 16 locally, or Docker.
+Requirements: Docker with the compose plugin. Without Docker: Python 3.12, Node.js 20+, npm, and PostgreSQL 16.
 
 ```bash
-./scripts/dev.sh
+./scripts/dev.sh          # build and start the whole stack
+./scripts/dev.sh logs     # follow logs; extra args go to `docker compose logs`
+./scripts/dev.sh down     # stop; data stays in the engram-pg volume
 ```
 
 Open [http://127.0.0.1:18415](http://127.0.0.1:18415).
 
-The script loads `.env`, creates `.venv`, installs Python dependencies, and installs the web app if needed. It starts one Postgres server and waits until it accepts connections, then starts all five services plus Next.js. With Docker available it runs `docker compose up -d postgres`. Otherwise it starts the local PostgreSQL cluster, creates the `engram` role, and creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness`. It does not use the old single-process Node server.
+With a running Docker daemon, `./scripts/dev.sh` runs `docker compose up -d --build --wait`. Compose starts `postgres:16`, waits for `pg_isready`, then starts the services in dependency order. The script returns once every container, including the web app, passes its healthcheck. Each service gets its own `DATABASE_URL` on that server. Compose reads `.env` for `OPENROUTER_*`. If another Postgres already listens on 5432, set `POSTGRES_PORT` to publish the Compose Postgres on a different host port.
 
-## Run with Docker
-
-```bash
-docker compose up --build
-```
-
-The web app is published on port 18415. Compose starts `postgres:16`, waits for `pg_isready`, then starts the services. Each service gets its own `DATABASE_URL` on that server. Data lives in the `engram-pg` volume.
+Without Docker, or with `./scripts/dev.sh local`, the script runs everything as host processes. It loads `.env`, creates `.venv`, installs Python dependencies, and installs the web app if needed. It starts one Postgres server and waits until it accepts connections, then starts all five services plus Next.js with logs in `logs/`. With Docker available it runs only Postgres in Compose. Otherwise it starts the local PostgreSQL cluster, creates the `engram` role, and creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness`. It does not use the old single-process Node server.
 
 ## Environment
 

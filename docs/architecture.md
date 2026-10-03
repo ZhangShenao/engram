@@ -191,15 +191,11 @@ data: {"type":"error","message":"...","timings":{...}}
 ./scripts/dev.sh
 ```
 
-`scripts/dev.sh` 会加载仓库根目录的 `.env`。本机有可用的 Docker 时，它执行 `docker compose up -d postgres` 并等待健康检查。否则它启动本机 PostgreSQL 集群（需要时安装 `postgresql`），创建角色 `engram` 和五个库，再用 `pg_isready` 等到 `127.0.0.1:5432` 接受连接。
+本机 Docker 守护进程可用时，`scripts/dev.sh` 执行 `docker compose up -d --build --wait`，整套服务都跑在容器里，等全部容器（包括 Web）通过 healthcheck 后返回。`scripts/dev.sh logs` 跟日志，`scripts/dev.sh down` 停止，数据留在 `engram-pg` 卷里。Compose 从 `.env` 读取 `OPENROUTER_*`；宿主机 5432 被占用时，用 `POSTGRES_PORT` 改 Postgres 的宿主端口，容器之间仍走 `postgres:5432`。
 
-或：
+没有 Docker，或执行 `scripts/dev.sh local` 时，脚本加载仓库根目录的 `.env`，在本机进程里跑五个服务和 `next dev`。有 Docker 时只用 Compose 起 `postgres`；否则启动本机 PostgreSQL 集群（需要时安装 `postgresql`），创建角色 `engram` 和五个库，再用 `pg_isready` 等到 `127.0.0.1:5432` 接受连接。
 
-```bash
-docker compose up --build
-```
-
-Compose 里的 `postgres` 服务使用官方 `postgres:16` 镜像，`scripts/init-postgres.sql` 在首次初始化时创建五个库。应用服务 `depends_on` 该服务的 healthcheck（`pg_isready`）。
+Compose 里的 `postgres` 服务使用官方 `postgres:16` 镜像，`scripts/init-postgres.sql` 在首次初始化时创建五个库。应用服务 `depends_on` 该服务的 healthcheck（`pg_isready`），Web 依赖 gateway 的 healthcheck。
 
 ```
 浏览器

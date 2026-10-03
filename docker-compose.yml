@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: engram
       POSTGRES_DB: engram
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - engram-pg:/var/lib/postgresql/data
       - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
@@ -135,6 +135,11 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18415').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
 
 volumes:
   engram-pg:
