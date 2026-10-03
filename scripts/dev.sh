@@ -1,49 +1,145 @@
 #!/usr/bin/env bash
-# Start Postgres, the five Engram services, and the Next.js app. Does not use port 43123.
+# Start Engram locally. Does not use port 43123.
+#
+#   scripts/dev.sh [up]   With a running Docker daemon, build and start the whole stack under
+#                         Docker Compose and wait until every container is healthy. Without
+#                         Docker, fall back to `local`.
+#   scripts/dev.sh local  Run Postgres, the five services, and Next.js as host processes.
+#   scripts/dev.sh logs   Follow Compose logs. Extra arguments go to `docker compose logs`.
+#   scripts/dev.sh down   Stop the Compose stack. Data stays in the engram-pg volume.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-export PATH="${HOME}/.local/bin:${PATH}"
-export PYTHONPATH="${ROOT}/packages/engram_contracts:${ROOT}/services/gateway:${ROOT}/services/character:${ROOT}/services/conversation:${ROOT}/services/memory:${ROOT}/services/harness"
-export PYTHONUNBUFFERED=1
-
-if [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
-fi
-
-export WEB_ORIGIN="${WEB_ORIGIN:-http://127.0.0.1:18415}"
-export GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:18410}"
-export CHARACTER_URL="${CHARACTER_URL:-http://127.0.0.1:18411}"
-export CONVERSATION_URL="${CONVERSATION_URL:-http://127.0.0.1:18412}"
-export MEMORY_URL="${MEMORY_URL:-http://127.0.0.1:18413}"
-export HARNESS_URL="${HARNESS_URL:-http://127.0.0.1:18414}"
-export CHARACTER_DATABASE_URL="${CHARACTER_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_character}"
-export CONVERSATION_DATABASE_URL="${CONVERSATION_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_conversation}"
-export MEMORY_DATABASE_URL="${MEMORY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_memory}"
-export HARNESS_DATABASE_URL="${HARNESS_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_harness}"
-export GATEWAY_DATABASE_URL="${GATEWAY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:5432/engram_gateway}"
-
-if [[ ! -x .venv/bin/python ]]; then
-  rm -rf .venv
-  python3 -m venv .venv
-fi
-# shellcheck disable=SC1091
-source .venv/bin/activate
-python -m pip install -q -r requirements.txt
-
-if [[ ! -d web/node_modules ]]; then
-  npm --prefix web install
-fi
-
-mkdir -p logs
+WEB_URL="http://127.0.0.1:18415"
+APP_PORTS=(18410 18411 18412 18413 18414 18415)
 
 port_busy() {
-  python -c "import socket,sys; s=socket.socket(); s.settimeout(0.2); sys.exit(0 if s.connect_ex(('127.0.0.1', int(sys.argv[1])))==0 else 1)" "$1"
+  python3 -c "import socket,sys; s=socket.socket(); s.settimeout(0.2); sys.exit(0 if s.connect_ex(('127.0.0.1', int(sys.argv[1])))==0 else 1)" "$1"
+}
+
+docker_ready() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
+}
+
+require_docker() {
+  if ! docker_ready; then
+    echo "Docker with the compose plugin is not available, or the daemon is not running." >&2
+    exit 1
+  fi
+}
+
+compose_postgres_port() {
+  docker compose config --format json \
+    | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['postgres']['ports'][0]['published'])"
+}
+
+compose_up() {
+  if [[ -z "$(docker compose ps -q --status running)" ]]; then
+    local pg_port port
+    pg_port="$(compose_postgres_port)"
+    if port_busy "$pg_port"; then
+      echo "Port ${pg_port} is already in use. Stop that process, or set POSTGRES_PORT in .env to publish the Compose Postgres elsewhere." >&2
+      exit 1
+    fi
+    for port in "${APP_PORTS[@]}"; do
+      if port_busy "$port"; then
+        echo "Port ${port} is already in use. Stop that process before running scripts/dev.sh." >&2
+        exit 1
+      fi
+    done
+  fi
+
+  echo "Building and starting the Engram stack with Docker Compose..."
+  if ! docker compose up -d --build --wait --wait-timeout 300; then
+    docker compose ps -a >&2
+    echo "The stack did not become healthy. Run: scripts/dev.sh logs" >&2
+    exit 1
+  fi
+
+  docker compose ps
+  echo
+  echo "Engram is running at ${WEB_URL}"
+  echo "Logs: scripts/dev.sh logs    Stop: scripts/dev.sh down"
+}
+
+run_local() {
+  export PATH="${HOME}/.local/bin:${PATH}"
+  export PYTHONPATH="${ROOT}/packages/engram_contracts:${ROOT}/services/gateway:${ROOT}/services/character:${ROOT}/services/conversation:${ROOT}/services/memory:${ROOT}/services/harness"
+  export PYTHONUNBUFFERED=1
+
+  if [[ -f .env ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+  fi
+
+  local pg_port=5432
+  if docker_ready; then
+    pg_port="$(compose_postgres_port)"
+  fi
+
+  export WEB_ORIGIN="${WEB_ORIGIN:-http://127.0.0.1:18415}"
+  export GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:18410}"
+  export CHARACTER_URL="${CHARACTER_URL:-http://127.0.0.1:18411}"
+  export CONVERSATION_URL="${CONVERSATION_URL:-http://127.0.0.1:18412}"
+  export MEMORY_URL="${MEMORY_URL:-http://127.0.0.1:18413}"
+  export HARNESS_URL="${HARNESS_URL:-http://127.0.0.1:18414}"
+  export CHARACTER_DATABASE_URL="${CHARACTER_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_character}"
+  export CONVERSATION_DATABASE_URL="${CONVERSATION_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_conversation}"
+  export MEMORY_DATABASE_URL="${MEMORY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_memory}"
+  export HARNESS_DATABASE_URL="${HARNESS_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_harness}"
+  export GATEWAY_DATABASE_URL="${GATEWAY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_gateway}"
+
+  if [[ ! -x .venv/bin/python ]]; then
+    rm -rf .venv
+    python3 -m venv .venv
+  fi
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+  python -m pip install -q -r requirements.txt
+
+  if [[ ! -d web/node_modules ]]; then
+    npm --prefix web install
+  fi
+
+  mkdir -p logs
+
+  start_postgres
+
+  local port
+  for port in "${APP_PORTS[@]}"; do
+    if port_busy "$port"; then
+      echo "Port ${port} is already in use. Stop that process before running scripts/dev.sh." >&2
+      exit 1
+    fi
+  done
+
+  pids=()
+  trap cleanup EXIT INT TERM
+
+  start character python -m uvicorn character_service.main:app --host 0.0.0.0 --port 18411
+  start conversation python -m uvicorn conversation_service.main:app --host 0.0.0.0 --port 18412
+  start memory python -m uvicorn memory_service.main:app --host 0.0.0.0 --port 18413
+  start harness python -m uvicorn harness_service.main:app --host 0.0.0.0 --port 18414
+
+  wait_url "http://127.0.0.1:18411/health"
+  wait_url "http://127.0.0.1:18412/health"
+  wait_url "http://127.0.0.1:18413/health"
+  wait_url "http://127.0.0.1:18414/health"
+
+  start gateway python -m uvicorn gateway_service.main:app --host 0.0.0.0 --port 18410
+  wait_url "http://127.0.0.1:18410/health"
+
+  start web env GATEWAY_URL="http://127.0.0.1:18410" npm --prefix web run dev
+  wait_url "$WEB_URL"
+
+  echo "Engram is running at ${WEB_URL}"
+  wait -n
+  echo "A process exited. See logs/." >&2
+  exit 1
 }
 
 wait_postgres() {
@@ -79,7 +175,7 @@ SQL
 }
 
 start_postgres() {
-  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  if docker_ready; then
     docker compose up -d postgres
     echo "Waiting for Postgres from docker compose..."
     local attempt
@@ -113,22 +209,11 @@ start_postgres() {
   ensure_local_databases
 }
 
-start_postgres
-
-for port in 18410 18411 18412 18413 18414 18415; do
-  if port_busy "$port"; then
-    echo "Port ${port} is already in use. Stop that process before running scripts/dev.sh." >&2
-    exit 1
-  fi
-done
-
-pids=()
 cleanup() {
   for pid in "${pids[@]:-}"; do
     kill "$pid" 2>/dev/null || true
   done
 }
-trap cleanup EXIT INT TERM
 
 start() {
   local name="$1"
@@ -149,23 +234,31 @@ wait_url() {
   exit 1
 }
 
-start character python -m uvicorn character_service.main:app --host 0.0.0.0 --port 18411
-start conversation python -m uvicorn conversation_service.main:app --host 0.0.0.0 --port 18412
-start memory python -m uvicorn memory_service.main:app --host 0.0.0.0 --port 18413
-start harness python -m uvicorn harness_service.main:app --host 0.0.0.0 --port 18414
+command="${1:-up}"
+[[ $# -gt 0 ]] && shift
 
-wait_url "http://127.0.0.1:18411/health"
-wait_url "http://127.0.0.1:18412/health"
-wait_url "http://127.0.0.1:18413/health"
-wait_url "http://127.0.0.1:18414/health"
-
-start gateway python -m uvicorn gateway_service.main:app --host 0.0.0.0 --port 18410
-wait_url "http://127.0.0.1:18410/health"
-
-start web env GATEWAY_URL="http://127.0.0.1:18410" npm --prefix web run dev
-wait_url "http://127.0.0.1:18415"
-
-echo "Engram is running at http://127.0.0.1:18415"
-wait -n
-echo "A process exited. See logs/." >&2
-exit 1
+case "$command" in
+  up)
+    if docker_ready; then
+      compose_up
+    else
+      echo "Docker is not available. Starting Engram as host processes instead." >&2
+      run_local
+    fi
+    ;;
+  local)
+    run_local
+    ;;
+  logs)
+    require_docker
+    docker compose logs -f "$@"
+    ;;
+  down)
+    require_docker
+    docker compose down "$@"
+    ;;
+  *)
+    echo "Usage: scripts/dev.sh [up|local|logs|down]" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.env.*
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.coverage
+coverage.json
+reports
+logs
+docs
+web
+adapters
+fused_model

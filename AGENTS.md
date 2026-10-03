@@ -83,6 +83,8 @@ pytest
 ./scripts/dev.sh
 ```
 
+有 Docker 时它用 Docker Compose 构建并启动整套服务，等所有容器健康后返回；`./scripts/dev.sh logs` 看日志，`./scripts/dev.sh down` 停止。没有 Docker，或用 `./scripts/dev.sh local`，则在本机进程里跑。本机 5432 已被占用时，设置 `POSTGRES_PORT` 换一个宿主端口。
+
 Web 在 http://127.0.0.1:18415。不要占用 3000、5173、8080 或 43123。
 
 ## Git
