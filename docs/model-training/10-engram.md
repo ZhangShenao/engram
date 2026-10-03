@@ -15,9 +15,13 @@ mlx_lm.fuse \
   --save-path ~/engram-tune/fused
 ```
 
+融合做的算术就是把低秩项加进基座：对每个挂了 LoRA 的投影，用还原后的权重加上 `scale · BA`，再按你选的精度存成新文件。之后的前向不再需要单独读 `A` 和 `B`。Engram 的请求体里没有适配器字段，所以服务器必须加载已经加好的那一份。只加载 4-bit 基座，等于 `BA` 没加上，评测看到的是微调之前的分布。
+
 上游默认从 `adapters/` 读、写到 `fused_model/`。上面的两个路径把产物留在仓库外面。`--adapter-path` 和 `--save-path` 是 `mlx_lm.fuse` 的参数。
 
-融合后再用第 8 章的同一条考题各生成一次：一次带 `--adapter-path`，一次加载融合目录。两段回复应同样留在角色里。如果只有适配器路径下的回复还在戏里，用 `--dequantize` 再融一次。得到的是未量化权重，14B 大约 30 GB，推理时这台 48 GB 的机器放得下，磁盘也要按这个大小留。不要用 GGUF 导出这条 Qwen 路线，mlx-lm 的 GGUF 导出目前写明只覆盖 Mistral、Mixtral 和 Llama 风格。
+4-bit 基座上的 `W` 是分档存的。把一份很小的 `BA` 加进去再重新分档，有的增量会落进原来的档位，等于被吃掉。所以融合后要用第 8 章的同一条考题再生成一次，和 `--adapter-path` 的输出比。两段都应留在角色里。若只有适配器路径下的回复还在戏里，用 `--dequantize` 再融一次，得到未量化权重。14B 大约 30 GB。推理时这台 48 GB 的机器放得下短上下文，磁盘也要按这个大小留。不要用 GGUF 导出这条 Qwen 路线，mlx-lm 的 GGUF 导出目前写明只覆盖 Mistral、Mixtral 和 Llama 风格。
+
+流式回复是一串 SSE 行。Harness 只取 `choices[0].delta.content` 里的增量文本，拼成气泡。非流式响应把整段放在 `message.content`，这条解析路径对不上，界面会是空的。curl 时先看 `stream: true` 的行里有没有 `delta`。
 
 ## 起服务
 
@@ -30,7 +34,7 @@ mlx_lm.server \
   --port 18420
 ```
 
-先用 curl 看非流式回复，再看流式。Harness 的解析认 SSE 行里的 `choices[0].delta.content`。
+先用一条不带 `stream` 的请求确认服务有回复，再打开 `stream: true`。Harness 的解析只认 SSE 行里的 `choices[0].delta.content`。
 
 ```bash
 curl http://127.0.0.1:18420/v1/chat/completions \
