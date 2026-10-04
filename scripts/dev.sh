@@ -198,11 +198,11 @@ start_postgres() {
   fi
   if command -v pg_lsclusters >/dev/null 2>&1; then
     local ver name port status rest
-    while read -r ver name port status rest; do
+    pg_lsclusters --no-header | while read -r ver name port status rest; do
       if [[ "$status" != "online" ]]; then
         sudo pg_ctlcluster "$ver" "$name" start || true
       fi
-    done < <(pg_lsclusters --no-header)
+    done
   fi
   echo "Waiting for local Postgres..."
   wait_postgres
