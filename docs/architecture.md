@@ -1,220 +1,69 @@
-# Engram — Harness 与微服务架构
+# Engram — 上下文编排与服务边界
 
-> **产品名**：Engram  
-> **版本**：Phase 1（海外 Web 纯文字角色扮演）  
-> **读者**：产品负责人与实现者  
-> **运行时**：Python 3.12 微服务 + Next.js Web。无 Kubernetes。
+> **产品名**：Engram
+> **读者**：产品负责人与实现者
+> **运行时**：Python 3.12。chat-service 对外 HTTP，其余内部服务 gRPC。无 Kubernetes。
 
-Engram 的 **Harness** 是我们自己的角色扮演编排服务，不是第三方产品。它负责组装 prompt、维持人设稳定与 token 预算、检索记忆、调用模型，并写回记忆与滚动摘要。角色卡、会话、记忆各自是它调用的独立服务。Web 只访问 Gateway。
-
----
-
-## 1. 为什么是 Harness，再加上这些服务
-
-Phase 1 的行为（人设不可被裁掉、槽位只取代 `user_name`、滚动摘要只吃被挤出的 turn、无密钥仍可演示）必须有一个明确的编排者。若把这些规则散落在 Web 的 API Route 里，裁剪顺序和记忆写入会跟路由绑死，也无法单独测试。
-
-拆成五个进程，是为了把**谁拥有数据**和**谁做决定**分开：
-
-| 服务 | 为什么单独存在 |
-|------|----------------|
-| **gateway** | Web 的唯一入口。鉴权以后可以只加在这里；现在它只做转发、CORS，以及启动时的种子引导。 |
-| **character** | 角色卡是相对稳定的主数据，和某一轮聊天无关。 |
-| **conversation** | 会话、原文消息、滚动摘要是时间线。摘要的文本归会话服务保存，但**何时追加**由 Harness 决定。 |
-| **memory** | 提取、排序、槽位取代、用户编辑/删除都作用在记忆上。已删除行只留在这个库里，不会被别的服务“恢复”。 |
-| **harness** | 唯一知道完整 prompt 长什么样的服务。它调用上面三者，再调用 OpenRouter 或脚本化 Provider。 |
-
-共享包 `packages/engram_contracts` 只有 Pydantic 契约（角色卡、记忆、上下文层、常量）。算法留在拥有它的服务里。
+浏览器只访问 chat-service。Web 把 `/gateway/*` 代理到它。context-service 拥有聊天记录和检查器。llm-gateway 是唯一出站到模型的进程。memory-service 拥有记忆。
 
 ---
 
-## 2. 服务边界
+## 1. 四个服务
 
-每个服务是独立的 FastAPI 进程，有 `GET /health`，以及自己的 PostgreSQL 数据库。一台本地 Postgres，五个库，互不共享表。服务之间只走 HTTP（httpx），不共享数据库连接。
+| 服务 | 端口 | 数据库 | 拥有 | 不做什么 |
+|------|------|--------|------|----------|
+| chat | 18410 HTTP | `engram_chat` | 对外路由、CORS、角色卡、请求日志、启动种子 | 不保存消息，不组装 prompt |
+| context | 18411 gRPC | `engram_context` | 会话、消息、滚动摘要、裁剪、prompt、检查器快照、regenerate 替换事务、会话上的模型钉 | 不保存角色主数据，不直接给浏览器 |
+| memory | 18413 gRPC | `engram_memory` | 提取、排序、层级槽位、衰减、遗忘、冲突解决、用户改删 | 不生成聊天回复 |
+| llm-gateway | 18414 gRPC | 无 | OpenRouter 与脚本化 Provider、首字前的失败切换 | 不保存会话 |
+| web | 18415 | 无 | 英文 UI | 不实现业务规则 |
 
-| 服务 | 端口 | 数据库 | 拥有的决策 | 不做什么 |
-|------|------|--------|------------|----------|
-| gateway | 18410 | `engram_gateway` | 对外路由、启动时种子引导、请求日志（不含正文、不含密钥） | 不组装 prompt，不写记忆 |
-| character | 18411 | `engram_character` | 角色卡 CRUD、空库种子（Lyra、Zero、Mara） | 不保存消息 |
-| conversation | 18412 | `engram_conversation` | 会话、消息、滚动摘要文本、最近会话列表 | 不决定裁掉哪些 turn |
-| memory | 18413 | `engram_memory` | 提取、排序、槽位取代、用户改/删 | 不调用聊天模型生成回复 |
-| harness | 18414 | `engram_harness` | 上下文分层与裁剪、prompt 模板、模型调用、检查器快照 | 不直接对外给浏览器 |
-| web | 18415 | 无 | Character.AI 式交互的英文 UI | 不实现业务规则；请求打到 gateway |
+`engram_mq` 是消息队列的库，不属于某一个业务服务。context 发布，memory 消费。
 
-内部 URL 用环境变量：`CHARACTER_URL`、`CONVERSATION_URL`、`MEMORY_URL`、`HARNESS_URL`，默认即上表的 `127.0.0.1` 端口。
+角色卡由 chat 在每次回合请求里交给 context。context 不回调 chat。
 
-### 2.1 Gateway（Web 唯一公开 API）
+## 2. 通信
 
-- `GET /api/characters`、`POST /api/characters`、`GET|PUT|DELETE /api/characters/{id}`
-- `GET /api/chats` 最近会话
-- `GET /api/chats/{characterId}` 会话与消息
-- `POST /api/chats/{characterId}/stream` 新的一轮（SSE）
-- `POST /api/chats/{characterId}/regenerate` 重写最后一条助手消息（SSE）
-- `POST /api/chats/{characterId}/continue` 续写（SSE）
-- `GET /api/memories/{characterId}`、`PATCH /api/memories/{memoryId}`、`DELETE /api/memories/{memoryId}`
-- `GET /api/inspector/{characterId}` 最近一次检查器快照
+同步用 gRPC，异步用 Postgres 队列（`SKIP LOCKED`）。内部服务不对浏览器暴露 HTTP。进程健康检查是各服务自己的 `Check` RPC。
 
-用户 id 固定为 `local`。没有注册登录。
-
-### 2.2 Character
-
-`GET|POST /characters`，`GET|PUT|DELETE /characters/{id}`，`POST /internal/seed`（空库才插入三个种子角色）。
-
-### 2.3 Conversation
-
-- `POST /sessions/ensure`：按 `(character_id, user_id)` 取或建会话
-- `GET /sessions/by-character/{characterId}`
-- `GET|POST /sessions/{id}/messages`
-- `POST /sessions/{id}/messages/{messageId}/replace`：同一事务里写入新消息并删除旧消息（regenerate）
-- `DELETE /sessions/{id}/messages/{messageId}`
-- `GET /sessions/{id}/summary`、`POST /sessions/{id}/summary/append`
-- `GET /sessions/recent`
-- `POST /internal/ensure-greeting`：会话尚无消息时写入角色 greeting
-- `DELETE /sessions/by-character/{characterId}`
-
-摘要追加时保留末尾约 4000 字符，与 Phase 1 一致。
-
-### 2.4 Memory
-
-- `GET /memories`：活跃记忆（无 `deleted_at`、无 `superseded_by_id`）
-- `POST /memories/rank`：按 salience、新近度、词面相关度排序
-- `POST /memories/extract`：从一轮对白提取候选，解析槽位，必要时取代，再插入。模型给出的 `slot` 只有 `user_name` 会保留，其它字符串丢掉后再按类型和正文推断
-- `POST /memories/discard-turn`：按 `sourceTurnId` 软删某一轮产生的记忆
-- `PATCH /memories/{id}`、`DELETE /memories/{id}`（软删）
-- `DELETE /memories`：按角色清空（删角色时）
-
-无 `OPENROUTER_API_KEY` 时用确定性提取器；有密钥时用 OpenRouter JSON 提取。提取失败返回空列表，不阻断聊天。
-
-### 2.5 Harness
-
-- `POST /turns/stream`：编排一整轮，SSE 事件 `inspector`、`chunk`、`done`、`error`
-- `GET /inspections/{characterId}`：该角色最近一次检查器快照
-
-Prompt 与裁剪代码：
-
-- `services/harness/harness_service/persona/stability.py`
-- `services/harness/harness_service/prompt/templates.py`、`builder.py`
-- `services/harness/harness_service/context/assembler.py`、`tokens.py`
-- `services/harness/harness_service/llm/`（OpenRouter 与脚本化 Provider）
-- `services/harness/harness_service/orchestrator.py`
-
-排序只在 Memory 的 `POST /memories/rank`（`domain/rank.py`）里做。Harness 按该响应的顺序做 token 预算装箱，不再导入 Memory 的排序实现。
-
----
-
-## 3. 一轮聊天的同步请求路径
-
-`mode=chat`。浏览器通过 Next 同源代理访问 Gateway，Gateway 把 SSE 原样转给浏览器。逐步说明、流程图和时序图见 [chat-turn.md](chat-turn.md)。
-
-Gateway 到 Harness、Harness 到三个内部服务、Harness 到模型、Memory 到模型，各用进程内长期存活的 HTTP 客户端，连接在轮次之间复用。
-
-```
-Web  POST /gateway/api/chats/{characterId}/stream  { message }
- └─ Gateway  POST harness /turns/stream
-      1. 并行：
-         Character    GET  /characters/{id}
-         Conversation POST /sessions/ensure
-         Memory       POST /memories/rank          （query = 本轮 user 文本）
-      2. 会话 id 到手后并行：
-         Conversation POST /sessions/{id}/messages （写入 user 消息，然后 GET 历史）
-         Conversation GET  /sessions/{id}/summary  （可与写入和读历史重叠）
-      3. Harness 本地 assemble_context
-         （人设 / 记忆 / 摘要 / 最近 turn / reanchor / hint，超预算按第 7 节裁剪）
-      4. 写入 engram_harness 检查器快照，先把 inspector 事件推下去
-      5. OpenRouter 或脚本化 Provider 流式生成
-      6. Conversation POST /sessions/{id}/messages （写入 assistant）
-      7. 若 evictedTurns 非空：
-         Conversation POST /sessions/{id}/summary/append
-         （只追加被挤出 verbatim 窗口的 turn 原文）
-      8. SSE done（含编排、首字、生成耗时；extractMs 仍为空）
-      9. Memory POST /memories/extract
-         写回检查器快照里的 extractMs。浏览器已可开始下一轮
-```
-
-`regenerate`：不新增 user 消息。最后一条必须是 assistant。若它的前一条也是 assistant（续写），prompt 保留更早的回复，只替换最后一条，发给模型的最新 user 行是续写指令。否则 verbatim 截到最后一条 user 之前，待替换的 assistant 不进入 prompt。新回复和删除旧回复在 Conversation 的一次事务里完成；事务失败时旧回复还在。替换成功后、SSE `done` 之前，软删 `source_turn_id` 等于旧回复的记忆。提取在 `done` 之后。角色卡和会话与摘要读取并行；排序要等历史确定 query 之后，再和仍在进行的摘要读取一起完成。
-
-`continue`：不落库续写指令，也不把该指令交给记忆提取。verbatim 为全部历史；发给模型的最后一条 user 是续写指令（不计入可裁剪窗口）。排序 query 用上一条真实 user 文本。新的 assistant 消息另起一条。
-
-SSE 形状：
-
-```
-data: {"type":"inspector","inspector":{...}}
-data: {"type":"chunk","text":"..."}
-data: {"type":"done","messageId":"...","content":"...","sessionId":"...","provider":"scripted|openrouter","timings":{"orchestrationMs":0,"modelFirstTokenMs":0,"modelTotalMs":0,"extractMs":null}}
-data: {"type":"error","message":"...","timings":{...}}
-```
-
-`done` 到达时记忆提取还没开始。提取结束后，同一次检查器快照补上 `extractMs`。浏览器收到 `done` 就解锁输入；响应体关闭后再读一次检查器，上下文面板才显示提取耗时。
-
----
-
-## 4. 数据归属
-
-五个库在同一台 PostgreSQL 上，互不读取对方的表。连接串分别是 `CHARACTER_DATABASE_URL`、`CONVERSATION_DATABASE_URL`、`MEMORY_DATABASE_URL`、`HARNESS_DATABASE_URL`、`GATEWAY_DATABASE_URL`。容器里每个进程只拿到自己的 `DATABASE_URL`（主机名 `postgres`）。
-
-### 4.1 `engram_character` · `characters`
-
-`name`, `tagline`, `description`, `personality`, `scenario`, `example_dialogues`（JSON）, `greeting`, `speech_style`, `boundaries`, 时间戳。
-
-### 4.2 `engram_conversation`
-
-- `chat_sessions`：`(character_id, user_id)` 唯一
-- `messages`：`role` = `user` | `assistant`
-- `session_summaries`：滚动摘要正文
-
-### 4.3 `engram_memory` · `memories`
-
-| 字段 | 说明 |
+| 调用 | 方式 |
 |------|------|
-| `type` | `fact` \| `relationship` \| `promise` \| `boundary` \| `plot` |
-| `text` | 正文 |
-| `salience` | 0–1 |
-| `slot` | 可空。Phase 1 仅 `user_name` 会触发取代 |
-| `source_turn_id` | 来源 assistant 消息 |
-| `superseded_by_id` | 被同槽新记忆取代 |
-| `deleted_at` | 软删。删除后不清除标记，检索永远跳过 |
+| chat → context 一轮聊天 | 服务端流 |
+| chat → context 读历史、greeting、删会话、检查器 | 一元 RPC |
+| chat → memory 列表、改、删、按角色清空 | 一元 RPC |
+| context → memory 排序、按 turn 丢弃 | 一元 RPC |
+| context → llm-gateway 补全 | 服务端流 |
+| memory → llm-gateway JSON 提取 | 一元 RPC |
+| 回合结束后的提取、被装进 prompt 的记忆强化 | 队列 `memory.extract`、`memory.reinforce` |
+| 摘要追加 | 仍在同步路径里，context 自己写自己的库 |
 
-### 4.4 `engram_harness` · `inspections`
+提取失败只重试队列，不另发 SSE。`done` 的 `extractMs` 仍为空。memory 提取结束后调用 context 的 `StampExtract`，检查器快照才补上耗时。
 
-每轮保存分层内容、token 估算、裁剪日志，供刷新后的 Context 面板读取。不保存 API 密钥。
+被 regenerate 替换掉的 turn 会写入 `discarded_turns`。之后才到达的提取看到这个墓碑就不再插入，因此提取不必挡在 `done` 前面。
 
-### 4.5 `engram_gateway` · `request_log`
+## 3. 一轮 chat
 
-方法、路径、状态码、时间。不记录 body 与请求头。
+1. chat 读本地角色卡，把角色卡 JSON 和用户文本交给 context `StreamTurn`。
+2. context 并行：确保会话，按本轮用户文本向 memory 排序。会话 id 到手后开始读摘要，与排序重叠；排序结束后写入用户消息并读历史。
+3. 本地 `assemble_context`。检查器快照先落库再推出 `inspector`。快照是这一轮发给模型的打包结果（分层、token、裁剪日志、被挤出的 turn），不是第二份完整消息表。
+4. 用会话上的 `(provider, model)` 钉调用 llm-gateway。无密钥时网关直接走脚本化 Provider，不改会话钉。
+5. 有密钥且首字尚未吐出时，网关可以按备用链整轮换一家。已经有 token 之后失败就结束这一轮，不接半句话。换成功后 context 把会话钉改成实际用的那一家。本期备用链只有 OpenRouter。
+6. 写入 assistant。有 `evictedTurns` 时追加滚动摘要。推出 `done`。
+7. 发布提取和强化消息。响应可以在发布后结束。
 
----
+`regenerate` 与 `continue` 的 prompt 规则不变。替换仍是 context 里的一个事务：写入新回复并删除旧回复。成功后、`done` 之前，按旧回复 id 丢弃记忆。
 
-## 5. 本地运行拓扑
+## 4. 模型钉
 
-不依赖旧的 Node 单体（端口 43123）。两种方式都先启动 **一台 PostgreSQL**，等到它接受连接，再启动**五个 Python 进程 + Web**。
+钉存在 `chat_sessions.llm_provider` 和 `llm_model`，默认 `openrouter` + `anthropic/claude-sonnet-5`。llm-gateway 不存会话。同一次会话默认打到同一个 Provider 和模型。
 
-```bash
-./scripts/dev.sh
-```
+## 5. 记忆
 
-本机 Docker 守护进程可用时，`scripts/dev.sh` 执行 `docker compose up -d --build --wait`，整套服务都跑在容器里，等全部容器（包括 Web）通过 healthcheck 后返回。`scripts/dev.sh logs` 跟日志，`scripts/dev.sh down` 停止，数据留在 `engram-pg` 卷里。Compose 从 `.env` 读取 `OPENROUTER_*`；宿主机 5432 被占用时，用 `POSTGRES_PORT` 改 Postgres 的宿主端口，容器之间仍走 `postgres:5432`。
+槽位是点分路径。同路径取代，不同路径并存。`user_name` 是 `user.name` 的别名。
 
-没有 Docker，或执行 `scripts/dev.sh local` 时，脚本加载仓库根目录的 `.env`，在本机进程里跑五个服务和 `next dev`。有 Docker 时只用 Compose 起 `postgres`；否则启动本机 PostgreSQL 集群（需要时安装 `postgresql`），创建角色 `engram` 和五个库，再用 `pg_isready` 等到 `127.0.0.1:5432` 接受连接。
+内置路径：`user.name`、`user.language`、`relationship.status`、`boundary.limit`、`promise.commitment`。
 
-Compose 里的 `postgres` 服务使用官方 `postgres:16` 镜像，`scripts/init-postgres.sql` 在首次初始化时创建五个库。应用服务 `depends_on` 该服务的 healthcheck（`pg_isready`），Web 依赖 gateway 的 healthcheck。
-
-```
-浏览器
-  └─ Web :18415  （Next.js Route Handler 将 /gateway/* 转到 Gateway）
-       └─ Gateway :18410          engram_gateway
-            ├─ Character    :18411   engram_character
-            ├─ Conversation :18412   engram_conversation
-            ├─ Memory       :18413   engram_memory
-            └─ Harness      :18414   engram_harness
-                 └─ https://openrouter.ai/api/v1/chat/completions
-                    （无 OPENROUTER_API_KEY 时不发出）
-
-Postgres :5432
-  engram_gateway / engram_character / engram_conversation / engram_memory / engram_harness
-```
-
-端口故意避开 3000、5173、8080、43123。
-
-Gateway 启动时会重试调用 Character 的 `/internal/seed`，再为每个尚无消息的角色写入 greeting。因此第一次打开即可和 Lyra、Zero、Mara 聊天。
+排序用衰减后的 salience（半衰期 30 天），权重仍是 salience 0.45、recency 0.35、relevance 0.20。创建已超过 14 天且衰减后 salience 低于 0.2 的活跃记忆会被标成 forgotten，不再参与排序和列表。被装进 prompt 的记忆通过队列强化，salience 略增并刷新 `last_reinforced_at`。正文几乎相同的新候选不另插一行，而是强化已有行。
 
 ---
 
@@ -263,15 +112,15 @@ Gateway 启动时会重试调用 Character 的 `/internal/seed`，再为每个�
 
 同类型多条可以并存。取代仅当候选带 `supersedesMemoryId`，或与某条活跃记忆同属一个槽位。
 
-Phase 1 唯一内置槽位：`user_name`（`services/memory/memory_service/domain/slots.py`）。`infer_memory_slot` 只在 fact 且文本像姓名时返回该槽。
+槽位路径见第 5 节（`services/memory/memory_service/domain/slots.py`）。`user.name` 在 fact 且文本像姓名时推断出来。
 
 新增槽位：在 `MEMORY_SLOTS` 增加常量，在 `infer_memory_slot`（或提取器的 `slot` 字段）返回它。`find_superseded_memory` 已按槽匹配。补一条单测：同槽取代，不同槽并存。
 
-排序权重：salience 0.45、recency 0.35、relevance 0.20。已删除与已取代的记忆不参与。
+排序权重：衰减后的 salience 0.45、recency 0.35、relevance 0.20。已删除、已取代、已遗忘的记忆不参与。
 
 ### 7.4 无密钥
 
-`OPENROUTER_API_KEY` 为空时，Harness 使用脚本化流式 Provider，Memory 使用确定性提取器。UI、记忆面板、检查器仍然可用。
+`OPENROUTER_API_KEY` 为空时，llm-gateway 使用脚本化流式 Provider，Memory 使用确定性提取器。UI、记忆面板、检查器仍然可用。
 
 ### 7.5 Prompt 段落顺序
 
@@ -291,7 +140,7 @@ Chat Completions：`https://openrouter.ai/api/v1/chat/completions`。
 - `HTTP-Referer: https://github.com/ZhangShenao/engram`
 - `X-Title: Engram`
 
-记忆提取在有密钥时走同一 base URL、同一模型与同一对产品头，`temperature` 0.2，要求 JSON。
+记忆提取在有密钥时经 llm-gateway 走同一模型与同一对产品头，`temperature` 0.2，要求 JSON。
 
 ---
 
@@ -305,7 +154,7 @@ Chat Completions：`https://openrouter.ai/api/v1/chat/completions`。
 - 创建/编辑角色是独立的专注流程，不是聊天里的一块侧栏。
 - 仅 Engram 提供的右侧滑层：记忆（编辑/删除）与上下文检查器（分层、token 估算、裁剪日志）。
 
-Web 不直连四个内部服务。
+Web 不直连 context、memory、llm-gateway。
 
 ---
 
@@ -319,7 +168,7 @@ pytest
 
 覆盖裁剪顺序、人设保留、`evictedTurns`、记忆排序、槽位取代，以及 prompt 段落顺序。这些测试不启动进程、不需要 API 密钥。`OPENROUTER_API_KEY` 为空时走脚本化 Provider。
 
-CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑 `scripts/quality_report.py`，再构建 `web/`。质量检查包含全部 `pytest`、语句覆盖率（不低于 65%）和代码重复率（不高于 5%）。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_gateway`、`engram_character`、`engram_conversation`、`engram_memory`、`engram_harness`，并把五个服务的 `DATABASE_URL` 指到这些库。`OPENROUTER_API_KEY` 置空。检查结束后，在对应的 pull request 上更新一条工程质量报告。不读取仓库密钥；评论使用 Actions 自带的 `GITHUB_TOKEN`。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
+CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑 `scripts/quality_report.py`，再构建 `web/`。质量检查包含全部 `pytest`、语句覆盖率（不低于 65%）和代码重复率（不高于 5%）。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_chat`、`engram_context`、`engram_memory`、`engram_mq`。`OPENROUTER_API_KEY` 置空。检查结束后，在对应的 pull request 上更新一条工程质量报告。不读取仓库密钥；评论使用 Actions 自带的 `GITHUB_TOKEN`。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
 
 ---
 

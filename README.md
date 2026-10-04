@@ -2,7 +2,7 @@
 
 Engram is an overseas, text-only roleplay chat for the web. You write character cards, talk in a dark full-height shell, and open the exact context and memories that shaped each reply.
 
-The **harness** is Engram’s own roleplay orchestrator. It builds the prompt, keeps the persona and token budget intact, retrieves memory, calls the model, and writes memories plus the rolling summary. Character cards, conversations, and memories are separate services. The browser talks only to the gateway.
+**context-service** is Engram’s roleplay orchestrator. It owns the transcript, builds the prompt, keeps the persona and token budget intact, retrieves memory, and calls **llm-gateway**. The browser talks only to **chat-service**, which owns character cards and the public HTTP API.
 
 Web only. No voice, image generation, accounts, or social feed.
 
@@ -11,11 +11,10 @@ Web only. No voice, image generation, accounts, or social feed.
 | Service | Port | Owns |
 |---------|------|------|
 | web | 18415 | Next.js UI |
-| gateway | 18410 | Public API, seed bootstrap, request log |
-| character | 18411 | Character cards (`engram_character`) |
-| conversation | 18412 | Sessions, messages, rolling summary (`engram_conversation`) |
-| memory | 18413 | Extract, rank, slot supersede, edit/delete (`engram_memory`) |
-| harness | 18414 | Context assembly, prompts, model call, inspector snapshots (`engram_harness`) |
+| chat | 18410 HTTP | Public API, character cards, seed bootstrap, request log (`engram_chat`) |
+| context | 18411 gRPC | Sessions, messages, summary, prompt, inspector (`engram_context`) |
+| memory | 18413 gRPC | Extract, rank, hierarchical slots, decay, edit/delete (`engram_memory`) |
+| llm-gateway | 18414 gRPC | OpenRouter and the scripted provider, session pin, pre-token failover |
 
 Lyra, Zero, and Mara are seeded on an empty character database, with their greetings stored as the first assistant message.
 
@@ -33,7 +32,7 @@ Open [http://127.0.0.1:18415](http://127.0.0.1:18415).
 
 With a running Docker daemon, `./scripts/dev.sh` runs `docker compose up -d --build --wait`. Compose starts `postgres:16`, waits for `pg_isready`, then starts the services in dependency order. The script returns once every container, including the web app, passes its healthcheck. Each service gets its own `DATABASE_URL` on that server. Compose reads `.env` for `OPENROUTER_*`. If another Postgres already listens on 5432, set `POSTGRES_PORT` to publish the Compose Postgres on a different host port.
 
-Without Docker, or with `./scripts/dev.sh local`, the script runs everything as host processes. It loads `.env`, runs `uv sync --frozen` to create `.venv` from `uv.lock`, and installs the web app if needed. It starts one Postgres server and waits until it accepts connections, then starts all five services plus Next.js with logs in `logs/`. With Docker available it runs only Postgres in Compose. Otherwise it starts the local PostgreSQL cluster, creates the `engram` role, and creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness`. It does not use the old single-process Node server.
+Without Docker, or with `./scripts/dev.sh local`, the script runs everything as host processes. It loads `.env`, runs `uv sync --frozen` to create `.venv` from `uv.lock`, and installs the web app if needed. It starts one Postgres server and waits until it accepts connections, then starts chat, context, memory, llm-gateway, and Next.js with logs in `logs/`. With Docker available it runs only Postgres in Compose. Otherwise it starts the local PostgreSQL cluster, creates the `engram` role, and creates `engram_chat`, `engram_context`, `engram_memory`, and `engram_mq`. An existing Compose volume created before this split does not pick up new databases; remove the `engram-pg` volume once so `scripts/init-postgres.sql` runs again.
 
 ## Environment
 
@@ -44,17 +43,15 @@ Copy `.env.example` if you want a file. `scripts/dev.sh` and Compose also work w
 | `OPENROUTER_API_KEY` | empty | Empty uses the scripted streaming provider and the deterministic memory extractor |
 | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-5` | OpenRouter model id. This slug is on the public model list |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Chat Completions base |
-| `CHARACTER_URL` | `http://127.0.0.1:18411` | Internal |
-| `CONVERSATION_URL` | `http://127.0.0.1:18412` | Internal |
-| `MEMORY_URL` | `http://127.0.0.1:18413` | Internal |
-| `HARNESS_URL` | `http://127.0.0.1:18414` | Internal |
-| `GATEWAY_URL` | `http://127.0.0.1:18410` | Used by the Next.js proxy |
-| `WEB_ORIGIN` | `http://127.0.0.1:18415` | Gateway CORS |
-| `CHARACTER_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_character` | Character cards |
-| `CONVERSATION_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_conversation` | Sessions, messages, summary |
+| `GATEWAY_URL` | `http://127.0.0.1:18410` | Used by the Next.js proxy; this is chat-service |
+| `CONTEXT_TARGET` | `127.0.0.1:18411` | gRPC |
+| `MEMORY_TARGET` | `127.0.0.1:18413` | gRPC |
+| `LLM_TARGET` | `127.0.0.1:18414` | gRPC |
+| `WEB_ORIGIN` | `http://127.0.0.1:18415` | Chat CORS |
+| `CHAT_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_chat` | Character cards and request log |
+| `CONTEXT_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_context` | Sessions, messages, summary, inspections |
 | `MEMORY_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_memory` | Memories |
-| `HARNESS_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_harness` | Inspector snapshots |
-| `GATEWAY_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_gateway` | Request log |
+| `MQ_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_mq` | Extract and reinforce queue |
 
 Inside Compose, each container receives `DATABASE_URL` pointed at host `postgres` and its own database. A service uses its `*_DATABASE_URL` when set, and otherwise `DATABASE_URL`.
 
@@ -104,7 +101,7 @@ The ESLint hook needs `web/node_modules`; run `npm --prefix web install` first.
 
 ## Git workflow
 
-Branch from `main` and open a pull request. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It cancels a run when a newer commit supersedes it. The job starts PostgreSQL 16, creates `engram_gateway`, `engram_character`, `engram_conversation`, `engram_memory`, and `engram_harness` from [`scripts/init-postgres.sql`](scripts/init-postgres.sql), installs Python dependencies with `uv sync --frozen` and the web app with `npm ci`, and runs `pre-commit run --all-files`, the same hooks as a local commit. It then runs [`scripts/quality_report.py`](scripts/quality_report.py) with those service `DATABASE_URL`s and an empty `OPENROUTER_API_KEY`. That script runs `pytest` and fails the job when statement coverage is under 65%, duplicated lines are over 5%, or `ruff check` / `ruff format --check` report anything. It then runs `npm run build` in `web/`. No repository secrets are required. When the job finishes, it updates one quality-report comment on the pull request.
+Branch from `main` and open a pull request. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It cancels a run when a newer commit supersedes it. The job starts PostgreSQL 16, creates `engram_chat`, `engram_context`, `engram_memory`, and `engram_mq` from [`scripts/init-postgres.sql`](scripts/init-postgres.sql), installs Python dependencies with `uv sync --frozen` and the web app with `npm ci`, and runs `pre-commit run --all-files`, the same hooks as a local commit. It then runs [`scripts/quality_report.py`](scripts/quality_report.py) with those service `DATABASE_URL`s and an empty `OPENROUTER_API_KEY`. That script runs `pytest` and fails the job when statement coverage is under 65%, duplicated lines are over 5%, or `ruff check` / `ruff format --check` report anything. It then runs `npm run build` in `web/`. No repository secrets are required. When the job finishes, it updates one quality-report comment on the pull request.
 
 `main` rejects direct pushes, including from admins. Changes land through a pull request, and the `ci` check must pass before merge. The branch must be up to date with `main`.
 

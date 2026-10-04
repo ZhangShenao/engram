@@ -1,31 +1,21 @@
-# Memory
+# memory-service
 
-记忆的唯一所有者。负责提取、排序、槽位取代，以及用户编辑和软删。
+记忆的唯一所有者。内部 gRPC，端口 18413。库 `engram_memory`。
 
 ## 行为
 
 - 类型：`fact`、`relationship`、`promise`、`boundary`、`plot`。同类型可以有多条。
-- 取代只发生在显式 `supersedesMemoryId`，或同一 `slot`。Phase 1 只有 `user_name`。模型返回的其它 `slot` 会丢掉，再按类型和正文推断。
-- `deleted_at` 一旦写上就不再检索。软删不会被改回。
-- 无 `OPENROUTER_API_KEY`：确定性提取器（姓名、承诺、边界、关系、情节的规则）。
-- 有密钥：OpenRouter JSON 提取，失败时返回空列表，不打断聊天。
-- 排序权重：salience 0.45、recency 0.35、词面相关度 0.20。已删除和已取代的不参与。
+- 槽位是点分路径。同路径取代，不同路径并存。`user_name` 是 `user.name` 的别名。
+- 内置路径：`user.name`、`user.language`、`relationship.status`、`boundary.limit`、`promise.commitment`。
+- 正文几乎相同的新候选不另插一行，而是强化已有记忆。
+- 排序用衰减后的 salience（半衰期 30 天），权重 salience 0.45、recency 0.35、词面相关度 0.20。
+- 创建超过 14 天且衰减后 salience 低于 0.2 的记忆标为 forgotten，不再进入列表和排序。
+- `deleted_at` 一旦写上就不再检索。被替换的 turn 还会写入 `discarded_turns`，晚到的提取不再插入。
+- 无 `OPENROUTER_API_KEY`：确定性提取器。
+- 有密钥：经 llm-gateway 做 JSON 提取。提取由队列 `memory.extract` 触发，失败可重试，不打断聊天。
 
-姓名规则跑在小写文本上，因此 “My name is Alex” 会存成 “The user's name is alex.”。这是 Phase 1 的同一条正则。
+## RPC
 
-## API
+`List`、`Rank`、`DiscardTurn`、`Update`、`Delete`、`DeleteByCharacter`。提取不在同步 RPC 上。
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/health` | |
-| GET | `/memories?characterId&userId` | 只返回活跃记忆 |
-| POST | `/memories/rank` | `{characterId, userId, query}` → 带 `score` 的排序结果 |
-| POST | `/memories/extract` | 从一轮对白提取并落库，必要时取代 |
-| POST | `/memories/discard-turn` | `{sourceTurnId}` 软删该轮产生的记忆 |
-| PATCH | `/memories/{id}` | `{text?, type?, salience?}`。不改 slot |
-| DELETE | `/memories/{id}` | 软删 |
-| DELETE | `/memories?characterId=` | 角色被删时清掉该角色的行 |
-
-## 数据
-
-数据库 `engram_memory`（`MEMORY_DATABASE_URL`）表 `memories`。槽位取代只针对 `user_name`。`deleted_at` 是软删。槽位逻辑在 `memory_service/domain/slots.py`，排序在 `domain/rank.py`，取代在 `domain/supersede.py`。
+槽位逻辑在 `memory_service/domain/slots.py`，排序和衰减在 `domain/rank.py`，取代与重复合并在 `domain/supersede.py`。

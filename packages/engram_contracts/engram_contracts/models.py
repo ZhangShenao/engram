@@ -50,6 +50,8 @@ class MemoryRecord(BaseModel):
     source_turn_id: str | None = Field(default=None, alias="sourceTurnId")
     superseded_by_id: str | None = Field(default=None, alias="supersededById")
     deleted_at: str | None = Field(default=None, alias="deletedAt")
+    forgotten_at: str | None = Field(default=None, alias="forgottenAt")
+    last_reinforced_at: str | None = Field(default=None, alias="lastReinforcedAt")
     created_at: str = Field(alias="createdAt")
     updated_at: str = Field(alias="updatedAt")
     score: float | None = None
@@ -96,3 +98,4 @@ class AssembledContext(BaseModel):
     evicted_turns: list[VerbatimTurn] = Field(alias="evictedTurns")
     total_tokens: int = Field(alias="totalTokens")
     budget: int
+    packed_memory_ids: list[str] = Field(default_factory=list, alias="packedMemoryIds")

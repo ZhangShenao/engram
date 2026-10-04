@@ -1,8 +1,8 @@
 # Engram 开发规范
 
-Engram 是五个 Python 服务加上一个 Next.js Web。Harness 是我们自己的角色扮演编排服务，不是第三方产品。
+Engram 是四个 Python 服务加上一个 Next.js Web。上下文编排在 context-service 里，不是第三方产品。
 
-五个服务是 gateway、character、conversation、memory、harness。浏览器只访问 gateway。Web 把 `/gateway/*` 代理到 gateway。
+四个服务是 chat、context、memory、llm-gateway。浏览器只访问 chat。Web 把 `/gateway/*` 代理到 chat。
 
 ## 开始一个新需求
 
@@ -33,22 +33,22 @@ git worktree remove ../engram-<short-name>
 
 ## 服务边界
 
-- `character` 拥有角色卡。`conversation` 拥有会话、消息和摘要正文。`memory` 拥有提取、排序、槽位取代和用户编辑。`harness` 拥有 prompt 组装、token 预算、模型调用和检查器快照。`gateway` 只做对外入口、转发和启动时的种子引导。
-- 服务之间走 HTTP。每个服务有自己的 Postgres 库：`engram_gateway`、`engram_character`、`engram_conversation`、`engram_memory`、`engram_harness`。它们在同一台本地 Postgres 上，不共享表，也不共享数据库连接。
+- `chat` 拥有角色卡和对外 HTTP（CORS、请求日志、种子引导）。`context` 拥有会话、消息、滚动摘要、裁剪、prompt、检查器快照。`memory` 拥有提取、排序、层级槽位、衰减、遗忘、冲突解决和用户编辑。`llm-gateway` 拥有模型接入、会话钉和首字前的失败切换。
+- 浏览器只访问 chat-service 的 HTTP。内部服务走 gRPC。记忆提取、强化和遗忘走 Postgres 消息队列。每个服务有自己的 Postgres 库：`engram_chat`、`engram_context`、`engram_memory`、`engram_mq`。它们在同一台本地 Postgres 上，互不共享表，也不共享数据库连接。
 - `packages/engram_contracts` 只放 Pydantic 形状和共享常量。不要把 prompt 或排序算法放进去。
 
 ## Prompt 放在哪里
 
-- 人设前缀、示例锚点、输出形态、re-anchor：`services/harness/harness_service/persona/stability.py`
-- 段落顺序：`services/harness/harness_service/prompt/templates.py`
-- 记忆和摘要块：`services/harness/harness_service/prompt/builder.py`
-- 裁剪顺序，以及真正发给模型的消息列表：`services/harness/harness_service/context/assembler.py`
-- 模型调用：`services/harness/harness_service/llm/`
-- 一轮聊天：`services/harness/harness_service/orchestrator.py`
+- 人设前缀、示例锚点、输出形态、re-anchor：`services/context/context_service/persona/stability.py`
+- 段落顺序：`services/context/context_service/prompt/templates.py`
+- 记忆和摘要块：`services/context/context_service/prompt/builder.py`
+- 裁剪顺序，以及真正发给模型的消息列表：`services/context/context_service/context/assembler.py`
+- 模型调用：`services/llm_gateway/llm_gateway_service/`
+- 一轮聊天：`services/context/context_service/orchestrator.py`
 
-不要把 system prompt 字符串写进 gateway 或 Web。
+不要把 system prompt 字符串写进 chat 或 Web。
 
-聊天流式请求必须带 `Accept: text/event-stream` 和 `Accept-Encoding: identity`。gzip 会把整段 SSE 攒到生成结束才解开。Gateway 向 Harness 拉流时同样不要压缩。
+聊天流式请求必须带 `Accept: text/event-stream` 和 `Accept-Encoding: identity`。gzip 会把整段 SSE 攒到生成结束才解开。llm-gateway 访问 OpenRouter 时同样不要压缩。chat 到 context 的内部流走 gRPC，不启用压缩。
 
 ## 增加记忆槽位
 
@@ -58,14 +58,14 @@ git worktree remove ../engram-<short-name>
 4. 确定性提取器和 LLM 提取器的 prompt 都要认识这个槽位。
 5. 加一条 pytest：同槽两条记忆会取代；一条无关事实不会。
 
-Phase 1 只有一个槽位：`user_name`。
+槽位是点分路径。同路径取代，父子和兄弟并存。姓名槽是 `user.name`（`user_name` 仍作为别名）。另外有 `user.language`、`relationship.status`、`boundary.limit`、`promise.commitment`。排序使用时间衰减后的 salience。超过遗忘窗口且衰减后过低的记忆标为 forgotten，不再参与排序。
 
 ## 增加或更换模型
 
 1. 把 `OPENROUTER_MODEL` 设成 `https://openrouter.ai/api/v1/models` 上存在的 id。
 2. 产品默认写在 `packages/engram_contracts/engram_contracts/constants.py`，当前是 `anthropic/claude-sonnet-5`。只有确实要改产品默认时才改这个常量。
 3. 聊天和记忆提取都保留 `HTTP-Referer` 和 `X-Title: Engram`。
-4. 保留无密钥路径：Harness 用 `ScriptedLLMProvider`，Memory 用 `DeterministicMemoryExtractor`。
+4. 保留无密钥路径：llm-gateway 用 `ScriptedLLMProvider`，Memory 用 `DeterministicMemoryExtractor`。脚本化 Provider 不是故障切换的目标。
 
 ## 依赖和测试
 

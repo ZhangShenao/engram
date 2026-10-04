@@ -34,11 +34,10 @@ jobs:
           --health-retries 5
     env:
       OPENROUTER_API_KEY: ""
-      CHARACTER_DATABASE_URL: postgresql://engram:engram@127.0.0.1:5432/engram_character
-      CONVERSATION_DATABASE_URL: postgresql://engram:engram@127.0.0.1:5432/engram_conversation
+      CHAT_DATABASE_URL: postgresql://engram:engram@127.0.0.1:5432/engram_chat
+      CONTEXT_DATABASE_URL: postgresql://engram:engram@127.0.0.1:5432/engram_context
       MEMORY_DATABASE_URL: postgresql://engram:engram@127.0.0.1:5432/engram_memory
-      HARNESS_DATABASE_URL: postgresql://engram:engram@127.0.0.1:5432/engram_harness
-      GATEWAY_DATABASE_URL: postgresql://engram:engram@127.0.0.1:5432/engram_gateway
+      MQ_DATABASE_URL: postgresql://engram:engram@127.0.0.1:5432/engram_mq
     steps:
       - uses: actions/checkout@v4
 

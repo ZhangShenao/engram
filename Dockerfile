@@ -14,10 +14,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY packages packages
 COPY services services
+COPY proto proto
 
 ENV PATH=/srv/.venv/bin:$PATH
-ENV PYTHONPATH=/srv/packages/engram_contracts:/srv/services/gateway:/srv/services/character:/srv/services/conversation:/srv/services/memory:/srv/services/harness
+ENV PYTHONPATH=/srv/packages/engram_contracts:/srv/packages/engram_queue:/srv/services/chat:/srv/services/context:/srv/services/memory:/srv/services/llm_gateway
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 18410
-CMD ["python", "-m", "uvicorn", "gateway_service.main:app", "--host", "0.0.0.0", "--port", "18410"]
+CMD ["python", "-m", "uvicorn", "chat_service.main:app", "--host", "0.0.0.0", "--port", "18410"]

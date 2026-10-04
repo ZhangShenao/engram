@@ -19,10 +19,10 @@ COVERAGE_MIN = 65
 DUPLICATION_MAX = 5
 COV_SOURCES = [
     "packages/engram_contracts/engram_contracts",
-    "services/character/character_service",
-    "services/conversation/conversation_service",
-    "services/gateway/gateway_service",
-    "services/harness/harness_service",
+    "packages/engram_queue/engram_queue",
+    "services/chat/chat_service",
+    "services/context/context_service",
+    "services/llm_gateway/llm_gateway_service",
     "services/memory/memory_service",
 ]
 
