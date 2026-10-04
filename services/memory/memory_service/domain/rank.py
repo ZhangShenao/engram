@@ -36,6 +36,32 @@ def recency_score(created_at: str, now_ms: float) -> float:
     return max(0.0, 1 - days / 30)
 
 
+HALF_LIFE_DAYS = 30
+FORGET_AFTER_DAYS = 14
+FORGET_SALIENCE = 0.2
+
+
+def age_days(stamp: str, now_ms: float) -> float:
+    return max(0.0, now_ms - _parse_ms(stamp)) / 86_400_000
+
+
+def decay_factor(stamp: str, now_ms: float) -> float:
+    return 0.5 ** (age_days(stamp, now_ms) / HALF_LIFE_DAYS)
+
+
+def effective_salience(memory: MemoryRecord, now_ms: float) -> float:
+    anchor = memory.last_reinforced_at or memory.created_at
+    return memory.salience * decay_factor(anchor, now_ms)
+
+
+def should_forget(memory: MemoryRecord, now_ms: float) -> bool:
+    if memory.deleted_at or memory.superseded_by_id or memory.forgotten_at:
+        return False
+    if age_days(memory.created_at, now_ms) < FORGET_AFTER_DAYS:
+        return False
+    return effective_salience(memory, now_ms) < FORGET_SALIENCE
+
+
 def rank_memories(
     memories: list[MemoryRecord],
     query: str,
@@ -45,11 +71,15 @@ def rank_memories(
     if now_ms is None:
         now_ms = time.time() * 1000
     weights = weights or DEFAULT_WEIGHTS
-    active = [m for m in memories if not m.deleted_at and not m.superseded_by_id]
+    active = [
+        memory
+        for memory in memories
+        if not memory.deleted_at and not memory.superseded_by_id and not memory.forgotten_at
+    ]
     ranked: list[MemoryRecord] = []
     for memory in active:
         score = (
-            weights["salience"] * memory.salience
+            weights["salience"] * effective_salience(memory, now_ms)
             + weights["recency"] * recency_score(memory.created_at, now_ms)
             + weights["relevance"] * relevance_score(query, memory.text)
         )

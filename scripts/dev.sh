@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 WEB_URL="http://127.0.0.1:18415"
-APP_PORTS=(18410 18411 18412 18413 18414 18415)
+APP_PORTS=(18410 18411 18413 18414 18415)
 
 port_busy() {
   python3 -c "import socket,sys; s=socket.socket(); s.settimeout(0.2); sys.exit(0 if s.connect_ex(('127.0.0.1', int(sys.argv[1])))==0 else 1)" "$1"
@@ -66,7 +66,7 @@ compose_up() {
 
 run_local() {
   export PATH="${HOME}/.local/bin:${PATH}"
-  export PYTHONPATH="${ROOT}/packages/engram_contracts:${ROOT}/services/gateway:${ROOT}/services/character:${ROOT}/services/conversation:${ROOT}/services/memory:${ROOT}/services/harness"
+  export PYTHONPATH="${ROOT}/packages/engram_contracts:${ROOT}/packages/engram_queue:${ROOT}/services/chat:${ROOT}/services/context:${ROOT}/services/memory:${ROOT}/services/llm_gateway"
   export PYTHONUNBUFFERED=1
 
   if [[ -f .env ]]; then
@@ -83,15 +83,13 @@ run_local() {
 
   export WEB_ORIGIN="${WEB_ORIGIN:-http://127.0.0.1:18415}"
   export GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:18410}"
-  export CHARACTER_URL="${CHARACTER_URL:-http://127.0.0.1:18411}"
-  export CONVERSATION_URL="${CONVERSATION_URL:-http://127.0.0.1:18412}"
-  export MEMORY_URL="${MEMORY_URL:-http://127.0.0.1:18413}"
-  export HARNESS_URL="${HARNESS_URL:-http://127.0.0.1:18414}"
-  export CHARACTER_DATABASE_URL="${CHARACTER_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_character}"
-  export CONVERSATION_DATABASE_URL="${CONVERSATION_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_conversation}"
+  export CONTEXT_TARGET="${CONTEXT_TARGET:-127.0.0.1:18411}"
+  export MEMORY_TARGET="${MEMORY_TARGET:-127.0.0.1:18413}"
+  export LLM_TARGET="${LLM_TARGET:-127.0.0.1:18414}"
+  export CHAT_DATABASE_URL="${CHAT_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_chat}"
+  export CONTEXT_DATABASE_URL="${CONTEXT_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_context}"
   export MEMORY_DATABASE_URL="${MEMORY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_memory}"
-  export HARNESS_DATABASE_URL="${HARNESS_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_harness}"
-  export GATEWAY_DATABASE_URL="${GATEWAY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_gateway}"
+  export MQ_DATABASE_URL="${MQ_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_mq}"
 
   if ! command -v uv >/dev/null 2>&1; then
     echo "uv is not installed. See https://docs.astral.sh/uv/getting-started/installation/" >&2
@@ -120,17 +118,15 @@ run_local() {
   pids=()
   trap cleanup EXIT INT TERM
 
-  start character python -m uvicorn character_service.main:app --host 0.0.0.0 --port 18411
-  start conversation python -m uvicorn conversation_service.main:app --host 0.0.0.0 --port 18412
-  start memory python -m uvicorn memory_service.main:app --host 0.0.0.0 --port 18413
-  start harness python -m uvicorn harness_service.main:app --host 0.0.0.0 --port 18414
+  start llm python -m llm_gateway_service.server
+  start memory python -m memory_service.server
+  start context python -m context_service.server
 
-  wait_url "http://127.0.0.1:18411/health"
-  wait_url "http://127.0.0.1:18412/health"
-  wait_url "http://127.0.0.1:18413/health"
-  wait_url "http://127.0.0.1:18414/health"
+  wait_py llm_gateway_service.healthcheck
+  wait_py memory_service.healthcheck
+  wait_py context_service.healthcheck
 
-  start gateway python -m uvicorn gateway_service.main:app --host 0.0.0.0 --port 18410
+  start chat python -m uvicorn chat_service.main:app --host 0.0.0.0 --port 18410
   wait_url "http://127.0.0.1:18410/health"
 
   start web env GATEWAY_URL="http://127.0.0.1:18410" npm --prefix web run dev
@@ -167,7 +163,7 @@ END
 $$;
 SQL
   local db
-  for db in engram_gateway engram_character engram_conversation engram_memory engram_harness; do
+  for db in engram_chat engram_context engram_memory engram_mq; do
     if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${db}'" | grep -q 1; then
       sudo -u postgres createdb -O engram "$db"
     fi
@@ -231,6 +227,18 @@ wait_url() {
     sleep 0.2
   done
   echo "Timed out waiting for ${url}. See logs/." >&2
+  exit 1
+}
+
+wait_py() {
+  local module="$1"
+  for _ in $(seq 1 50); do
+    if python -m "$module" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "Timed out waiting for ${module}. See logs/." >&2
   exit 1
 }
 

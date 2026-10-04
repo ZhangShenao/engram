@@ -1,6 +1,8 @@
 # 一轮聊天的执行过程
 
-本文描述浏览器发出一条消息之后，请求如何穿过 Web、Gateway 和 Harness，以及回复、记忆、耗时分别在什么时候对用户可见。服务边界和数据归属仍以 [architecture.md](architecture.md) 为准。
+本文描述浏览器发出一条消息之后，请求如何穿过 Web、chat-service 和 context-service，以及回复、记忆、耗时分别在什么时候对用户可见。服务边界以 [architecture.md](architecture.md) 为准。
+
+文中若仍出现 Gateway，指 chat-service 的对外 HTTP。Harness 指 context-service。角色卡由 chat 本地读出后随 `StreamTurn` 传入，context 不再单独请求角色服务。记忆提取在 SSE `done` 之后写入 `memory.extract` 队列，由 memory-service 消费，完成后再回写检查器的 `extractMs`。
 
 Phase 1 里，用户等的是模型。编排本身是几次内部 HTTP 和一次本地组装。下面四件事压的是这段可压缩的时间，以及回复已经生成之后还挡在界面前面的工作：
 
@@ -40,7 +42,7 @@ Gateway 上角色列表、记忆编辑这类短请求仍是各自打开客户端
 
 会话 id 到手之后，摘要读取立刻开始。与此同时写入用户消息，写完再读历史，并去掉刚写入的那条，使它只作为「最新用户行」进入 prompt，不进入可裁剪的 verbatim 窗口。摘要若还没回来，会和读历史重叠，组装前再汇合。
 
-本地 `assemble_context` 做人设、记忆装箱、摘要、最近 turn、re-anchor 和生成提示，超预算时按架构文档第 7 节裁剪。快照写入 `engram_harness.inspections`，随后推出 `inspector` 事件。这一事件里还没有耗时。
+本地 `assemble_context` 做人设、记忆装箱、摘要、最近 turn、re-anchor 和生成提示，超预算时按架构文档第 7 节裁剪。快照写入 `engram_context.inspections`，随后推出 `inspector` 事件。这一事件里还没有耗时。
 
 ### 2.2 模型
 
@@ -190,11 +192,10 @@ sequenceDiagram
 
 | 行为 | 位置 |
 |------|------|
-| 并行预取、`done` 之后提取、耗时 | `services/harness/harness_service/orchestrator.py` |
-| Harness 两个长期客户端 | `services/harness/harness_service/main.py` |
-| 模型连接复用 | `services/harness/harness_service/llm/openrouter.py` |
-| 快照回写 | `services/harness/harness_service/store.py` 的 `update_inspection` |
-| Gateway 到 Harness 的长期客户端 | `services/gateway/gateway_service/main.py` 的 `_proxy_turn` |
+| 并行预取、`done` 之后入队、耗时 | `services/context/context_service/orchestrator.py` |
+| 模型调用与失败切换 | `services/llm_gateway/llm_gateway_service/router.py` |
+| 快照回写 | `services/context/context_service/inspections.py` |
+| chat 到 context 的流 | `services/chat/chat_service/main.py` 的 `_proxy_turn` |
 | 提取连接复用 | `services/memory/memory_service/domain/extractor.py` |
 | 收到 `done` 解锁，响应结束后补读检查器 | `web/src/components/chat-panel.tsx` |
 | 四段耗时的展示 | `web/src/components/insight-sheets.tsx` |

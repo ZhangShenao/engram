@@ -61,7 +61,7 @@ def test_parser_keeps_the_user_name_slot():
             ]
         )
     )
-    assert candidates[0].slot == "user_name"
+    assert candidates[0].slot == "user.name"
 
 
 def test_parser_infers_user_name_when_the_model_invents_a_slot():
@@ -77,7 +77,7 @@ def test_parser_infers_user_name_when_the_model_invents_a_slot():
             ]
         )
     )
-    assert candidates[0].slot == "user_name"
+    assert candidates[0].slot == "user.name"
 
 
 class _ScriptedExtractor:

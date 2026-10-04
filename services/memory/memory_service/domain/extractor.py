@@ -3,7 +3,6 @@ import os
 import re
 from pathlib import Path
 
-import httpx
 from dotenv import load_dotenv
 
 for _parent in Path(__file__).resolve().parents:
@@ -12,12 +11,7 @@ for _parent in Path(__file__).resolve().parents:
         load_dotenv(_env_file)
         break
 
-from engram_contracts.constants import (
-    DEFAULT_MODEL_ID,
-    OPENROUTER_BASE_URL,
-    OPENROUTER_REFERER,
-    OPENROUTER_TITLE,
-)
+from engram_contracts.constants import DEFAULT_MODEL_ID
 from engram_contracts.models import MEMORY_TYPES, MemoryCandidate
 from memory_service.domain.slots import MEMORY_SLOTS, normalize_slot
 
@@ -126,72 +120,34 @@ def _parse_candidates(raw: str) -> list[MemoryCandidate]:
     return candidates
 
 
-_llm_client: httpx.AsyncClient | None = None
-
-
-def llm_http_client() -> httpx.AsyncClient:
-    global _llm_client
-    if _llm_client is None or _llm_client.is_closed:
-        _llm_client = httpx.AsyncClient(
-            timeout=60,
-            limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
-                keepalive_expiry=30.0,
-            ),
-        )
-    return _llm_client
-
-
-async def aclose_llm_client() -> None:
-    global _llm_client
-    if _llm_client is not None and not _llm_client.is_closed:
-        await _llm_client.aclose()
-    _llm_client = None
-
-
 class LLMMemoryExtractor:
     async def extract(self, user_message: str, assistant_message: str) -> list[MemoryCandidate]:
-        api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-        base = os.environ.get("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL).rstrip("/")
+        from memory_service.llm_client import complete_json
+
         model = os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL_ID)
         system = (
             "You extract structured roleplay memories from the latest exchange.\n"
             'Return JSON only: {"memories":[{"type":"fact|relationship|promise|boundary|plot",'
-            '"text":"...","salience":0.0-1.0,"slot":null or "user_name"}]}\n'
+            '"text":"...","salience":0.0-1.0,"slot":null or a known path}]}\n'
             "Rules:\n"
             "- Only salient, durable facts worth recalling later.\n"
-            '- Use slot "user_name" only for the user\'s name (one slot; new name supersedes).\n'
+            "- Known slots, same path supersedes, different paths coexist:\n"
+            '  "user.name", "user.language", "relationship.status", '
+            '"boundary.limit", "promise.commitment".\n'
+            '- "user_name" is an alias of "user.name".\n'
             "- Multiple facts/promises/plot beats can coexist; do not duplicate the same slot.\n"
             '- If nothing to store, return {"memories":[]}.'
         )
-        try:
-            response = await llm_http_client().post(
-                f"{base}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": OPENROUTER_REFERER,
-                    "X-Title": OPENROUTER_TITLE,
+        content = await complete_json(
+            [
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": f"User: {user_message}\nAssistant: {assistant_message}",
                 },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {
-                            "role": "user",
-                            "content": f"User: {user_message}\nAssistant: {assistant_message}",
-                        },
-                    ],
-                    "temperature": 0.2,
-                    "response_format": {"type": "json_object"},
-                },
-            )
-        except httpx.HTTPError:
-            return []
-        if response.status_code >= 400:
-            return []
-        content = response.json().get("choices", [{}])[0].get("message", {}).get("content") or "{}"
+            ],
+            model=model,
+        )
         return _parse_candidates(content)
 
 

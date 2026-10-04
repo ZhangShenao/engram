@@ -53,6 +53,20 @@ def test_infers_user_name_slot_when_the_candidate_omits_it():
     assert target.id == "old"
 
 
+def test_sibling_slots_do_not_supersede_each_other():
+    name = mem(id="name", text="The user's name is Mina.", slot="user.name")
+    language = find_superseded_memory(
+        MemoryCandidate(
+            type="fact",
+            text="The user speaks French.",
+            salience=0.8,
+            slot="user.language",
+        ),
+        [name],
+    )
+    assert language is None
+
+
 def test_keeps_two_unrelated_facts_active():
     coffee = mem(id="coffee", type="fact", text="The user likes coffee.")
     target = find_superseded_memory(

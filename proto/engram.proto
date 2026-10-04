@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package engram.v1;
+
+// Internal RPC. Browsers never call these services.
+// Complex records stay JSON so the Pydantic contracts remain the source of shape.
+
+service Context {
+  rpc Check(HealthRequest) returns (HealthResponse);
+  rpc StreamTurn(StreamTurnRequest) returns (stream StreamTurnEvent);
+  rpc GetChat(GetChatRequest) returns (GetChatResponse);
+  rpc ListRecent(ListRecentRequest) returns (ListRecentResponse);
+  rpc EnsureGreeting(EnsureGreetingRequest) returns (EnsureGreetingResponse);
+  rpc DeleteByCharacter(CharacterRef) returns (Ack);
+  rpc GetInspection(GetInspectionRequest) returns (GetInspectionResponse);
+  rpc StampExtract(StampExtractRequest) returns (Ack);
+}
+
+service Llm {
+  rpc Check(HealthRequest) returns (HealthResponse);
+  rpc Complete(CompleteRequest) returns (stream CompleteEvent);
+  rpc CompleteJson(CompleteJsonRequest) returns (CompleteJsonResponse);
+}
+
+service Memory {
+  rpc Check(HealthRequest) returns (HealthResponse);
+  rpc List(ListMemoriesRequest) returns (JsonReply);
+  rpc Rank(RankRequest) returns (JsonReply);
+  rpc DiscardTurn(DiscardTurnRequest) returns (DiscardTurnResponse);
+  rpc Update(UpdateMemoryRequest) returns (JsonReply);
+  rpc Delete(DeleteMemoryRequest) returns (Ack);
+  rpc DeleteByCharacter(CharacterRef) returns (Ack);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+message Ack {
+  bool ok = 1;
+}
+
+message CharacterRef {
+  string character_id = 1;
+}
+
+message JsonReply {
+  string json = 1;
+  bool found = 2;
+}
+
+message StreamTurnRequest {
+  string character_json = 1;
+  string user_id = 2;
+  string mode = 3;
+  string message = 4;
+}
+
+message StreamTurnEvent {
+  // "sse" carries one SSE frame. "error" is a pre-stream failure (status + message).
+  string kind = 1;
+  bytes sse = 2;
+  int32 status = 3;
+  string message = 4;
+}
+
+message GetChatRequest {
+  string character_id = 1;
+  string user_id = 2;
+}
+
+message GetChatResponse {
+  string session_id = 1;
+  string messages_json = 2;
+  string summary = 3;
+}
+
+message ListRecentRequest {
+  string user_id = 1;
+}
+
+message ListRecentResponse {
+  string chats_json = 1;
+}
+
+message EnsureGreetingRequest {
+  string character_id = 1;
+  string user_id = 2;
+  string greeting = 3;
+}
+
+message EnsureGreetingResponse {
+  string session_id = 1;
+  bool inserted = 2;
+}
+
+message GetInspectionRequest {
+  string character_id = 1;
+  string user_id = 2;
+}
+
+message GetInspectionResponse {
+  string inspector_json = 1;
+}
+
+message StampExtractRequest {
+  string inspection_id = 1;
+  int32 extract_ms = 2;
+}
+
+message ModelPin {
+  string provider = 1;
+  string model = 2;
+}
+
+message LlmMessage {
+  string role = 1;
+  string content = 2;
+}
+
+message CompleteRequest {
+  ModelPin pin = 1;
+  repeated ModelPin fallback = 2;
+  repeated LlmMessage messages = 3;
+  double temperature = 4;
+}
+
+message CompleteEvent {
+  string text = 1;
+  bool done = 2;
+  ModelPin served = 3;
+  string error = 4;
+}
+
+message CompleteJsonRequest {
+  ModelPin pin = 1;
+  repeated ModelPin fallback = 2;
+  repeated LlmMessage messages = 3;
+  double temperature = 4;
+}
+
+message CompleteJsonResponse {
+  string content = 1;
+  ModelPin served = 2;
+  string error = 3;
+}
+
+message ListMemoriesRequest {
+  string character_id = 1;
+  string user_id = 2;
+}
+
+message RankRequest {
+  string character_id = 1;
+  string user_id = 2;
+  string query = 3;
+}
+
+message DiscardTurnRequest {
+  string source_turn_id = 1;
+}
+
+message DiscardTurnResponse {
+  bool ok = 1;
+  int32 discarded = 2;
+}
+
+message UpdateMemoryRequest {
+  string memory_id = 1;
+  string patch_json = 2;
+}
+
+message DeleteMemoryRequest {
+  string memory_id = 1;
+}

@@ -39,11 +39,11 @@
 
 读原理时可以同时打开这些文件，不必改它们：
 
-- 人设、示例、输出形态、re-anchor：`services/harness/harness_service/persona/stability.py`
-- 段落顺序：`services/harness/harness_service/prompt/templates.py`
-- 记忆和摘要怎么拼进系统消息：`services/harness/harness_service/prompt/builder.py`
-- 真正发给模型的 `messages`：`services/harness/harness_service/context/assembler.py`
-- 模型调用：`services/harness/harness_service/llm/openrouter.py`
+- 人设、示例、输出形态、re-anchor：`services/context/context_service/persona/stability.py`
+- 段落顺序：`services/context/context_service/prompt/templates.py`
+- 记忆和摘要怎么拼进系统消息：`services/context/context_service/prompt/builder.py`
+- 真正发给模型的 `messages`：`services/context/context_service/context/assembler.py`
+- 模型调用：`services/llm_gateway/llm_gateway_service/openrouter.py`
 - 记忆提取走同一套 OpenRouter 环境变量：`services/memory/memory_service/domain/extractor.py`
 
 ## 这份材料不做什么

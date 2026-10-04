@@ -1,7 +1,7 @@
 [project]
 name = "engram"
 version = "0.1.0"
-description = "Engram backend: gateway, character, conversation, memory, and harness services"
+description = "Engram backend: chat, context, memory, and llm-gateway services"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -11,6 +11,8 @@ dependencies = [
     "pydantic>=2.10.0",
     "python-dotenv>=1.0.1",
     "psycopg[binary]>=3.2.3",
+    "grpcio>=1.71.0",
+    "protobuf>=6.31.1",
 ]
 
 [dependency-groups]
@@ -19,6 +21,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.16.0",
     "pre-commit>=4.0.0",
+    "grpcio-tools>=1.71.0",
 ]
 
 [tool.uv]
@@ -27,32 +30,39 @@ package = false
 [tool.pytest.ini_options]
 testpaths = [
     "services/memory/tests",
-    "services/harness/tests",
-    "services/conversation/tests",
-    "services/gateway/tests",
+    "services/context/tests",
+    "services/chat/tests",
+    "services/llm_gateway/tests",
 ]
 pythonpath = [
     "packages/engram_contracts",
+    "packages/engram_queue",
     "services/memory",
-    "services/harness",
-    "services/character",
-    "services/conversation",
-    "services/gateway",
+    "services/context",
+    "services/chat",
+    "services/llm_gateway",
 ]
+
+[tool.coverage.run]
+omit = ["*/engram_contracts/rpc/*"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 src = [
     "packages/engram_contracts",
-    "services/character",
-    "services/conversation",
-    "services/gateway",
-    "services/harness",
+    "packages/engram_queue",
+    "services/chat",
+    "services/context",
+    "services/llm_gateway",
     "services/memory",
     "scripts",
 ]
-extend-exclude = ["docs/model-training", "web"]
+extend-exclude = [
+    "docs/model-training",
+    "web",
+    "packages/engram_contracts/engram_contracts/rpc",
+]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM"]
@@ -60,15 +70,16 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # These modules load .env before importing code that reads the environment at import time.
 "services/*/*_service/main.py" = ["E402"]
-"services/harness/harness_service/llm/openrouter.py" = ["E402"]
+"services/*/*_service/server.py" = ["E402"]
+"services/llm_gateway/llm_gateway_service/openrouter.py" = ["E402"]
 "services/memory/memory_service/domain/extractor.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = [
     "engram_contracts",
-    "character_service",
-    "conversation_service",
-    "gateway_service",
-    "harness_service",
+    "engram_queue",
+    "chat_service",
+    "context_service",
+    "llm_gateway_service",
     "memory_service",
 ]
