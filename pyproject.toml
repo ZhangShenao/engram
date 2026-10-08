@@ -13,6 +13,7 @@ dependencies = [
     "psycopg[binary]>=3.2.3",
     "grpcio>=1.71.0",
     "protobuf>=6.31.1",
+    "aiokafka>=0.14.0",
 ]
 
 [dependency-groups]
@@ -29,6 +30,7 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = [
+    "packages/engram_queue/tests",
     "services/memory/tests",
     "services/context/tests",
     "services/chat/tests",

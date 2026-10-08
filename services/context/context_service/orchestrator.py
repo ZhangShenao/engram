@@ -388,21 +388,24 @@ async def stream_turn(
         return
 
     extract_user = "" if mode == "continue" else rank_query
-    queue.publish(
-        "memory.extract",
-        {
-            "characterId": character.id,
-            "userId": user_id,
-            "userMessage": extract_user,
-            "assistantMessage": content,
-            "turnId": saved["id"],
-            "inspectionId": inspection_id,
-        },
-    )
-    queue.publish(
-        "memory.reinforce",
-        {"memoryIds": list(assembled.packed_memory_ids)},
-    )
+    try:
+        queue.publish(
+            "memory.extract",
+            {
+                "characterId": character.id,
+                "userId": user_id,
+                "userMessage": extract_user,
+                "assistantMessage": content,
+                "turnId": saved["id"],
+                "inspectionId": inspection_id,
+            },
+        )
+        queue.publish(
+            "memory.reinforce",
+            {"memoryIds": list(assembled.packed_memory_ids)},
+        )
+    except Exception:
+        logger.exception("could not publish memory jobs")
     _log_timings(mode, timings)
 
 

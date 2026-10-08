@@ -34,7 +34,7 @@ git worktree remove ../engram-<short-name>
 ## 服务边界
 
 - `chat` 拥有角色卡和对外 HTTP（CORS、请求日志、种子引导）。`context` 拥有会话、消息、滚动摘要、裁剪、prompt、检查器快照。`memory` 拥有提取、排序、层级槽位、衰减、遗忘、冲突解决和用户编辑。`llm-gateway` 拥有模型接入、会话钉和首字前的失败切换。
-- 浏览器只访问 chat-service 的 HTTP。内部服务走 gRPC。记忆提取、强化和遗忘走 Postgres 消息队列。每个服务有自己的 Postgres 库：`engram_chat`、`engram_context`、`engram_memory`、`engram_mq`。它们在同一台本地 Postgres 上，互不共享表，也不共享数据库连接。
+- 浏览器只访问 chat-service 的 HTTP。内部服务走 gRPC。记忆提取和强化走 Kafka，主题是 `memory.extract` 和 `memory.reinforce`，消费组是 `engram-memory`。第五次仍失败的作业写入 `memory.dead`，不再执行。遗忘不是队列消息，而是 memory 消费循环在空闲时做的扫描。每个服务有自己的 Postgres 库：`engram_chat`、`engram_context`、`engram_memory`。它们在同一台本地 Postgres 上，互不共享表，也不共享数据库连接。不要再创建 `engram_mq`。队列的监听、记录格式和至少一次语义写在 `docs/queue.md`。宿主机和 CI 用 `KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9092`，Compose 网络里的 context 和 memory 用 `kafka:19092`。
 - `packages/engram_contracts` 只放 Pydantic 形状和共享常量。不要把 prompt 或排序算法放进去。
 
 ## Prompt 放在哪里

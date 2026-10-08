@@ -44,7 +44,7 @@
 - 记忆和摘要怎么拼进系统消息：`services/context/context_service/prompt/builder.py`
 - 真正发给模型的 `messages`：`services/context/context_service/context/assembler.py`
 - 模型调用：`services/llm_gateway/llm_gateway_service/openrouter.py`
-- 记忆提取走同一套 OpenRouter 环境变量：`services/memory/memory_service/domain/extractor.py`
+- 记忆提取的开关和 JSON 解析：`services/memory/memory_service/domain/extractor.py`。有密钥时经 `memory_service/llm_client.py` 调用 llm-gateway，作业从 Kafka 的 `memory.extract` 来，不在聊天流里同步执行
 
 ## 这份材料不做什么
 

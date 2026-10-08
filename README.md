@@ -13,26 +13,27 @@ Web only. No voice, image generation, accounts, or social feed.
 | web | 18415 | Next.js UI |
 | chat | 18410 HTTP | Public API, character cards, seed bootstrap, request log (`engram_chat`) |
 | context | 18411 gRPC | Sessions, messages, summary, prompt, inspector (`engram_context`) |
-| memory | 18413 gRPC | Extract, rank, hierarchical slots, decay, edit/delete (`engram_memory`) |
+| memory | 18413 gRPC | Extract, rank, hierarchical slots, decay, edit/delete (`engram_memory`). Consumes Kafka |
 | llm-gateway | 18414 gRPC | OpenRouter and the scripted provider, session pin, pre-token failover |
+| Kafka | 9092 | `memory.extract`, `memory.reinforce`, and the `memory.dead` letter topic |
 
 Lyra, Zero, and Mara are seeded on an empty character database, with their greetings stored as the first assistant message.
 
 ## Run locally
 
-Requirements: Docker with the compose plugin. Without Docker: [uv](https://docs.astral.sh/uv/getting-started/installation/), Node.js 20+, npm, and PostgreSQL 16. uv installs Python 3.12 itself if it is missing.
+Requirements: Docker with the compose plugin. Without Docker: [uv](https://docs.astral.sh/uv/getting-started/installation/), Node.js 20+, npm, PostgreSQL 16, and a Kafka 4.2 broker already listening at `KAFKA_BOOTSTRAP_SERVERS`. uv installs Python 3.12 itself if it is missing.
 
 ```bash
 ./scripts/dev.sh          # build and start the whole stack
 ./scripts/dev.sh logs     # follow logs; extra args go to `docker compose logs`
-./scripts/dev.sh down     # stop; data stays in the engram-pg volume
+./scripts/dev.sh down     # stop; data stays in the engram-pg and engram-kafka volumes
 ```
 
 Open [http://127.0.0.1:18415](http://127.0.0.1:18415).
 
-With a running Docker daemon, `./scripts/dev.sh` runs `docker compose up -d --build --wait`. Compose starts `postgres:16`, waits for `pg_isready`, then starts the services in dependency order. The script returns once every container, including the web app, passes its healthcheck. Each service gets its own `DATABASE_URL` on that server. Compose reads `.env` for `OPENROUTER_*`. If another Postgres already listens on 5432, set `POSTGRES_PORT` to publish the Compose Postgres on a different host port.
+With a running Docker daemon, `./scripts/dev.sh` runs `docker compose up -d --build --wait`. Compose starts `postgres:16` and a single-node Kafka 4.2 broker in KRaft mode, waits until both are healthy, then starts the services in dependency order: llm-gateway, memory, context, chat, web. The script returns once every container, including the web app, passes its healthcheck. Each service gets its own `DATABASE_URL` on that Postgres. context and memory receive `KAFKA_BOOTSTRAP_SERVERS=kafka:19092`, the in-network listener. The host port `9092` advertises `127.0.0.1:9092` for pytest and host processes. Compose reads `.env` for `OPENROUTER_*`. If another Postgres already listens on 5432, set `POSTGRES_PORT` to publish the Compose Postgres on a different host port. Port 9092 must be free; the broker advertises that host port, so it is not remapped.
 
-Without Docker, or with `./scripts/dev.sh local`, the script runs everything as host processes. It loads `.env`, runs `uv sync --frozen` to create `.venv` from `uv.lock`, and installs the web app if needed. It starts one Postgres server and waits until it accepts connections, then starts chat, context, memory, llm-gateway, and Next.js with logs in `logs/`. With Docker available it runs only Postgres in Compose. Otherwise it starts the local PostgreSQL cluster, creates the `engram` role, and creates `engram_chat`, `engram_context`, `engram_memory`, and `engram_mq`. An existing Compose volume created before this split does not pick up new databases; remove the `engram-pg` volume once so `scripts/init-postgres.sql` runs again.
+Without Docker, or with `./scripts/dev.sh local`, the script runs the app as host processes. It loads `.env`, runs `uv sync --frozen` to create `.venv` from `uv.lock`, and installs the web app if needed. With Docker available it starts only Postgres and Kafka in Compose. Otherwise it starts the local PostgreSQL cluster, creates the `engram` role, and creates `engram_chat`, `engram_context`, and `engram_memory`, then requires a Kafka broker already accepting connections on `127.0.0.1:9092`. It then starts chat, context, memory, llm-gateway, and Next.js with logs in `logs/`. An existing Compose volume created before the database split does not pick up new databases; remove the `engram-pg` volume once so `scripts/init-postgres.sql` runs again. Queue data lives in the separate `engram-kafka` volume. `scripts/dev.sh down` keeps both volumes.
 
 ## Environment
 
@@ -51,9 +52,9 @@ Copy `.env.example` if you want a file. `scripts/dev.sh` and Compose also work w
 | `CHAT_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_chat` | Character cards and request log |
 | `CONTEXT_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_context` | Sessions, messages, summary, inspections |
 | `MEMORY_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_memory` | Memories |
-| `MQ_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_mq` | Extract and reinforce queue |
+| `KAFKA_BOOTSTRAP_SERVERS` | `127.0.0.1:9092` | Extract, reinforce, and dead-letter topics. Inside Compose this is `kafka:19092` |
 
-Inside Compose, each container receives `DATABASE_URL` pointed at host `postgres` and its own database. A service uses its `*_DATABASE_URL` when set, and otherwise `DATABASE_URL`.
+Inside Compose, each container receives `DATABASE_URL` pointed at host `postgres` and its own database. A service uses its `*_DATABASE_URL` when set, and otherwise `DATABASE_URL`. Memory jobs are not stored in Postgres. context publishes `memory.extract` and `memory.reinforce` after the chat `done` event. memory consumes them in group `engram-memory`. A job that still fails on the fifth attempt is copied to `memory.dead` and not run again. Forgetting stale memories is a periodic scan in that consumer, not a topic. See [docs/queue.md](docs/queue.md).
 
 With a key, chat and memory extraction call OpenRouter and send `HTTP-Referer: https://github.com/ZhangShenao/engram` plus `X-Title: Engram`. Without a key, the UI, memories, and context inspector still run.
 
@@ -77,7 +78,7 @@ uv sync
 uv run pytest
 ```
 
-Tests cover trim order, persona retention, evicted turns, memory rank, slot supersede, and prompt section order. They do not need a running server or an API key. Leave `OPENROUTER_API_KEY` empty so the scripted provider is used.
+Tests cover trim order, persona retention, evicted turns, memory rank, slot supersede, prompt section order, and the Kafka queue (claim, delayed redelivery, dead letter). Service tests need PostgreSQL. Queue tests need a broker at `KAFKA_BOOTSTRAP_SERVERS` and do not need an API key. Leave `OPENROUTER_API_KEY` empty so the scripted provider is used.
 
 ## Lint and format
 
@@ -101,7 +102,7 @@ The ESLint hook needs `web/node_modules`; run `npm --prefix web install` first.
 
 ## Git workflow
 
-Branch from `main` and open a pull request. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It cancels a run when a newer commit supersedes it. The job starts PostgreSQL 16, creates `engram_chat`, `engram_context`, `engram_memory`, and `engram_mq` from [`scripts/init-postgres.sql`](scripts/init-postgres.sql), installs Python dependencies with `uv sync --frozen` and the web app with `npm ci`, and runs `pre-commit run --all-files`, the same hooks as a local commit. It then runs [`scripts/quality_report.py`](scripts/quality_report.py) with those service `DATABASE_URL`s and an empty `OPENROUTER_API_KEY`. That script runs `pytest` and fails the job when statement coverage is under 65%, duplicated lines are over 5%, or `ruff check` / `ruff format --check` report anything. It then runs `npm run build` in `web/`. No repository secrets are required. When the job finishes, it updates one quality-report comment on the pull request.
+Branch from `main` and open a pull request. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It cancels a run when a newer commit supersedes it. The job starts PostgreSQL 16, creates `engram_chat`, `engram_context`, and `engram_memory` from [`scripts/init-postgres.sql`](scripts/init-postgres.sql), and starts Kafka 4.2.2 with `KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9092`. It installs Python dependencies with `uv sync --frozen` and the web app with `npm ci`, and runs `pre-commit run --all-files`, the same hooks as a local commit. It then runs [`scripts/quality_report.py`](scripts/quality_report.py) with those service `DATABASE_URL`s and an empty `OPENROUTER_API_KEY`. That script runs `pytest` and fails the job when statement coverage is under 65%, duplicated lines are over 5%, or `ruff check` / `ruff format --check` report anything. It then runs `npm run build` in `web/`. No repository secrets are required. When the job finishes, it updates one quality-report comment on the pull request.
 
 `main` rejects direct pushes, including from admins. Changes land through a pull request, and the `ci` check must pass before merge. The branch must be up to date with `main`.
 
@@ -113,6 +114,6 @@ Included: character cards, streaming chat, regenerate, continue, typed memories 
 
 Not included: voice, image generation, auth, social feed, native apps, embeddings, group chat, or Kubernetes.
 
-Architecture (Chinese): [docs/architecture.md](docs/architecture.md). One chat turn: [docs/chat-turn.md](docs/chat-turn.md).
+Architecture (Chinese): [docs/architecture.md](docs/architecture.md). One chat turn: [docs/chat-turn.md](docs/chat-turn.md). Kafka queue: [docs/queue.md](docs/queue.md). Service notes: [docs/services](docs/services).
 
 Notes for training a local roleplay model on an Apple-silicon Mac, written for this harness: [docs/model-training/README.md](docs/model-training/README.md).

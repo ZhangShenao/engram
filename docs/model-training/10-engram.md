@@ -1,8 +1,8 @@
 # 10. 接回 Engram
 
-适配器还不是 Engram 里的一个开关。Harness 只会向 `OPENROUTER_BASE_URL/chat/completions` 发 OpenAI 风格的消息，并在 `OPENROUTER_API_KEY` 非空时才离开脚本化 Provider。本地模型要变成一个兼容这个请求的 HTTP 服务。
+适配器还不是 Engram 里的一个开关。真正打到模型的是 llm-gateway：它向 `OPENROUTER_BASE_URL/chat/completions` 发 OpenAI 风格的消息，并在 `OPENROUTER_API_KEY` 非空时才离开脚本化 Provider。context-service 把组装好的 `messages` 用 gRPC 交给它。本地模型要变成一个兼容这个请求的 HTTP 服务。记忆提取不在这条聊天流里同步执行；`done` 之后 context 把作业发到 Kafka，memory 再决定用确定性提取器还是再叫一次 llm-gateway。
 
-不要把系统提示词抄进 Gateway 或 Web。线上的句子继续由 `stability.py`、`builder.py` 和 `assembler.py` 生成。你的训练数据去对齐它们。
+不要把系统提示词抄进 chat 或 Web。线上的句子继续由 `stability.py`、`builder.py` 和 `assembler.py` 生成。你的训练数据去对齐它们。
 
 ## 融合成一个模型
 
@@ -52,9 +52,9 @@ curl http://127.0.0.1:18420/v1/chat/completions \
 
 `mlx_lm.server` 的文档写明它只做了基本的安全检查，只绑定在本机。不要把它暴露到局域网。
 
-## 让 Harness 指向它
+## 让 llm-gateway 指向它
 
-`OpenRouterProvider` 在密钥为空时不会被创建。本地服务器不校验密钥，可以给一个占位值。在启动 Harness 的环境里设置：
+`OpenRouterProvider` 在密钥为空时不会被创建。本地服务器不校验密钥，可以给一个占位值。在启动 llm-gateway 和 context 的环境里设置：
 
 ```bash
 export OPENROUTER_API_KEY=local
@@ -68,13 +68,11 @@ export OPENROUTER_MODEL=engram-local
 
 ## 记忆提取会走同一套变量
 
-`LLMMemoryExtractor` 同样读取 `OPENROUTER_API_KEY`、`OPENROUTER_BASE_URL` 和 `OPENROUTER_MODEL`。`scripts/dev.sh` 让五个服务继承同一份环境。密钥一旦非空，记忆提取也会打到 18420，并且请求里带 `response_format: json_object`，温度 0.2。
+memory 看到非空的 `OPENROUTER_API_KEY` 就不用确定性提取器，改经 llm-gateway 做一次 JSON 补全。`scripts/dev.sh` 让 chat、context、memory、llm-gateway 和 Web 继承同一份环境。密钥一旦非空，提取也会打到 18420：请求由 llm-gateway 发出，带 `response_format: json_object`，温度 0.2。这条调用发生在 Kafka 消费 `memory.extract` 的时候，不是在 SSE `done` 之前。聊天流已经结束，用户可以继续输入。提取失败时网关返回空 JSON，解析结果是空列表，记忆面板会悄悄停更。连续失败会按队列退避重试，第五次进入 `memory.dead`。
 
-角色扮演适配器经常接不住这个 JSON。提取失败时服务返回空列表，聊天仍继续，记忆面板会悄悄停更。
+角色扮演适配器经常接不住这个 JSON。第一轮对比声音时，用两种跑法里的一种：
 
-第一轮对比声音时，用两种跑法里的一种：
-
-- 只把上面三个变量设在单独启动 Harness 的 shell 里，Memory 进程不带密钥，继续用确定性提取器。
+- 只把上面三个变量设在 llm-gateway 和 context 的环境里。memory 进程不带密钥，继续用确定性提取器，Kafka 上的提取作业也不会打到 18420。
 - 或者接受提取暂时变空，评测只看回复，不看新写入的记忆。
 
 不要为了让提取变好，把 JSON 指令混进角色扮演训练集。那会把助手腔训回去。提取如果以后要换模型，是另一个小模型的任务。
