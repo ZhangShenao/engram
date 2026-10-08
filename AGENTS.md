@@ -113,7 +113,7 @@ CI 的 `ci` 任务先跑同一套 pre-commit 钩子，质量报告里也有一�
 ./scripts/dev.sh
 ```
 
-有 Docker 时它用 Docker Compose 构建并启动整套服务，等所有容器健康后返回；`./scripts/dev.sh logs` 看日志，`./scripts/dev.sh down` 停止。没有 Docker，或用 `./scripts/dev.sh local`，则在本机进程里跑，这时需要先装好 uv，脚本会执行 `uv sync --frozen`。本机 5432 已被占用时，设置 `POSTGRES_PORT` 换一个宿主端口。
+有 Docker 时它用 Docker Compose 构建并启动整套服务，等所有容器健康后返回；`./scripts/dev.sh logs` 看日志，`./scripts/dev.sh down` 停止。容器名是 `engram-postgres`、`engram-kafka`、`engram-llm-gateway`、`engram-memory`、`engram-context`、`engram-chat`、`engram-web`。容器之间用服务名通信：`postgres`、`kafka`、`llm-gateway`、`memory`、`context`、`chat`。不要把 `LLM_TARGET` 写成 `llm:18414` 或 `engram-llm-gateway:18414`。没有 Docker，或用 `./scripts/dev.sh local`，则在本机进程里跑，这时需要先装好 uv，脚本会执行 `uv sync --frozen`。本机 5432 已被占用时，设置 `POSTGRES_PORT` 换一个宿主端口。9092 要留给 Kafka。
 
 Web 在 http://127.0.0.1:18415。不要占用 3000、5173、8080 或 43123。
 

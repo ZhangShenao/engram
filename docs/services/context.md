@@ -2,6 +2,8 @@
 
 内部 gRPC，端口 18411。库 `engram_context`。一轮聊天的编排在这里，不在 chat，也不在某个外部上下文产品里。
 
+Compose 容器名是 `engram-context`，网络主机名是 `context`。它连 `memory:18413`、`llm-gateway:18414` 和 `kafka:19092`。`LLM_TARGET` 用服务名 `llm-gateway`，不用容器名 `engram-llm-gateway`。
+
 ## 拥有
 
 - 会话、消息、滚动摘要

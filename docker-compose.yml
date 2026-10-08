@@ -1,5 +1,7 @@
+# container_name 是 docker ps 里的名字。同一网络里的主机名仍是下面的服务名。
 services:
   postgres:
+    container_name: engram-postgres
     image: postgres:16
     environment:
       POSTGRES_USER: engram
@@ -17,6 +19,7 @@ services:
       retries: 30
 
   kafka:
+    container_name: engram-kafka
     image: apache/kafka:4.2.2
     hostname: kafka
     ports:
@@ -48,7 +51,8 @@ services:
       retries: 20
       start_period: 20s
 
-  llm:
+  llm-gateway:
+    container_name: engram-llm-gateway
     build: .
     command: ["python", "-m", "llm_gateway_service.server"]
     environment:
@@ -65,6 +69,7 @@ services:
       retries: 20
 
   memory:
+    container_name: engram-memory
     build: .
     command: ["python", "-m", "memory_service.server"]
     environment:
@@ -72,7 +77,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       MEMORY_PORT: "18413"
       CONTEXT_TARGET: context:18411
-      LLM_TARGET: llm:18414
+      LLM_TARGET: llm-gateway:18414
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
     ports:
@@ -82,7 +87,7 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-      llm:
+      llm-gateway:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-m", "memory_service.healthcheck"]
@@ -91,6 +96,7 @@ services:
       retries: 20
 
   context:
+    container_name: engram-context
     build: .
     command: ["python", "-m", "context_service.server"]
     environment:
@@ -98,7 +104,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       CONTEXT_PORT: "18411"
       MEMORY_TARGET: memory:18413
-      LLM_TARGET: llm:18414
+      LLM_TARGET: llm-gateway:18414
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
     ports:
@@ -110,7 +116,7 @@ services:
         condition: service_healthy
       memory:
         condition: service_healthy
-      llm:
+      llm-gateway:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-m", "context_service.healthcheck"]
@@ -119,6 +125,7 @@ services:
       retries: 20
 
   chat:
+    container_name: engram-chat
     build: .
     command: ["python", "-m", "uvicorn", "chat_service.main:app", "--host", "0.0.0.0", "--port", "18410"]
     environment:
@@ -142,6 +149,7 @@ services:
       retries: 30
 
   web:
+    container_name: engram-web
     build:
       context: ./web
       dockerfile: Dockerfile

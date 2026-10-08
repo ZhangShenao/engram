@@ -35,7 +35,7 @@ Engram 的检查器保存这一轮真正装进上下文的层。评测时同样�
 - 回复错了，而且记忆根本不在 system 里。这是组装或排序的问题，换适配器没有意义。
 - 记忆在 system 里，回复仍不用。这是模型行为，回到数据。
 
-本地还没接上 Harness 时，用 `mlx_lm.generate --adapter-path` 把同一条 system 和 user 喂进去，把输出存下来。接上 Harness 之后，用检查器核对线上 system 和训练 system 是不是同一套句子。两套句子不一致时，训练学到的格式对不上线上。
+本地还没接上 context-service 时，用 `mlx_lm.generate --adapter-path` 把同一条 system 和 user 喂进去，把输出存下来。接上之后，用检查器核对线上 system 和训练 system 是不是同一套句子。两套句子不一致时，训练学到的格式对不上线上。检查器在 `engram-context` 里，经 `engram-chat` 读出。
 
 ## 自问
 

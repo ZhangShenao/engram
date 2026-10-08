@@ -15,7 +15,7 @@
 
 | 进程 | 客户端 | 连向 | 生命周期 |
 |------|--------|------|----------|
-| Web | Next 的 Route Handler | chat 的 HTTP | 这一次浏览器请求 |
+| Web（容器 `engram-web`） | Next 的 Route Handler | `chat:18410` | 这一次浏览器请求 |
 | chat | `app.state.context` | context 的 gRPC | 进程启动到关闭。流结束只结束这一次 RPC，不关闭通道 |
 | context | memory stub | memory 的 `Rank`、`DiscardTurn` | 同上 |
 | context | llm stub | llm-gateway 的 `Complete` | 同上 |

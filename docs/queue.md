@@ -25,7 +25,7 @@ Compose 里的 broker 开了两路监听：
 | 监听 | 地址 | 谁用 |
 |------|------|------|
 | `PLAINTEXT_HOST` | `127.0.0.1:9092` | 宿主机上的进程、pytest、GitHub Actions |
-| `PLAINTEXT` | `kafka:19092` | 同一个 Compose 网络里的 context 和 memory |
+| `PLAINTEXT` | `kafka:19092` | 同一个 Compose 网络里的 `engram-context`、`engram-memory`。主机名是服务名 `kafka`，容器名是 `engram-kafka` |
 
 客户端必须使用自己能解析的那一个地址。容器里如果去连 `127.0.0.1:9092`，连到的是容器自己，不是 broker。宿主机如果只拿到内网广告地址 `kafka:19092`，名字解析也会失败。`KAFKA_BOOTSTRAP_SERVERS` 就是用来选这一路的。
 
@@ -34,7 +34,7 @@ Compose 里的 broker 开了两路监听：
 | 变量 | 默认 | 何处 |
 |------|------|------|
 | `KAFKA_BOOTSTRAP_SERVERS` | `127.0.0.1:9092` | 宿主机与 CI |
-| 同上 | `kafka:19092` | Compose 里的 context、memory |
+| 同上 | `kafka:19092` | 容器 `engram-context`、`engram-memory`。不要把 `KAFKA_BOOTSTRAP_SERVERS` 写成容器名 `engram-kafka` |
 | `KAFKA_GROUP_ID` | `engram-memory` | 只有测试会改成一次性的组，避免和正在跑的服务抢分区 |
 
 认证没有打开。broker 和四个服务处在同一台机器的信任边界里，和以前本机 Postgres 的假设相同。不要把 9092 暴露到公网。

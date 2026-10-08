@@ -18,6 +18,18 @@
 | llm-gateway | 18414 gRPC | 无 | OpenRouter 与脚本化 Provider、首字前的失败切换 | 不保存会话 |
 | web | 18415 | 无 | 英文 UI | 不实现业务规则 |
 
+Compose 里 `docker ps` 看到的是 `container_name`。容器互相访问时用的是服务名，不是 `container_name`。Kafka 的 `hostname` 也固定为 `kafka`，这样 KRaft 的控制器地址和内网广告地址都能解析。
+
+| 容器名 | 服务名 / 网络主机名 | 谁连它 |
+|--------|---------------------|--------|
+| `engram-postgres` | `postgres` | 各业务库，端口 5432 |
+| `engram-kafka` | `kafka` | context、memory 用 `kafka:19092`；宿主机用 `127.0.0.1:9092` |
+| `engram-llm-gateway` | `llm-gateway` | context、memory 的 `LLM_TARGET=llm-gateway:18414` |
+| `engram-memory` | `memory` | chat、context 的 `MEMORY_TARGET=memory:18413` |
+| `engram-context` | `context` | chat 的 `CONTEXT_TARGET=context:18411` |
+| `engram-chat` | `chat` | Web 的 `GATEWAY_URL=http://chat:18410` |
+| `engram-web` | `web` | 浏览器访问宿主端口 18415 |
+
 三个 Postgres 库各属一个服务，互不共享表，也不共享连接。消息队列是单独的 Kafka broker，不属于任何一个业务库。context 发布，memory 消费。以前用于队列的 `engram_mq` 库已经不再创建。
 
 角色卡由 chat 在每次回合请求里交给 context。context 不回调 chat 取角色，避免回合路径上的反向依赖。chat 删除角色时的顺序是：先让 memory 按角色清空，再让 context 删会话，最后删自己的角色卡。中途失败会留下已经清掉的下游数据，角色卡仍在，调用方可以重试删除。

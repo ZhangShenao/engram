@@ -8,14 +8,15 @@ Web only. No voice, image generation, accounts, or social feed.
 
 ## Service map
 
-| Service | Port | Owns |
-|---------|------|------|
-| web | 18415 | Next.js UI |
-| chat | 18410 HTTP | Public API, character cards, seed bootstrap, request log (`engram_chat`) |
-| context | 18411 gRPC | Sessions, messages, summary, prompt, inspector (`engram_context`) |
-| memory | 18413 gRPC | Extract, rank, hierarchical slots, decay, edit/delete (`engram_memory`). Consumes Kafka |
-| llm-gateway | 18414 gRPC | OpenRouter and the scripted provider, session pin, pre-token failover |
-| Kafka | 9092 | `memory.extract`, `memory.reinforce`, and the `memory.dead` letter topic |
+| Service | Container | Port | Owns |
+|---------|-----------|------|------|
+| web | `engram-web` | 18415 | Next.js UI. Calls `http://chat:18410` |
+| chat | `engram-chat` | 18410 HTTP | Public API, character cards, seed bootstrap, request log (`engram_chat`) |
+| context | `engram-context` | 18411 gRPC | Sessions, messages, summary, prompt, inspector (`engram_context`) |
+| memory | `engram-memory` | 18413 gRPC | Extract, rank, hierarchical slots, decay, edit/delete (`engram_memory`). Consumes Kafka |
+| llm-gateway | `engram-llm-gateway` | 18414 gRPC | OpenRouter and the scripted provider, session pin, pre-token failover |
+| Kafka | `engram-kafka` | 9092 | `memory.extract`, `memory.reinforce`, and the `memory.dead` letter topic. In-network clients use `kafka:19092` |
+| Postgres | `engram-postgres` | 5432 | `engram_chat`, `engram_context`, `engram_memory` |
 
 Lyra, Zero, and Mara are seeded on an empty character database, with their greetings stored as the first assistant message.
 
@@ -54,7 +55,7 @@ Copy `.env.example` if you want a file. `scripts/dev.sh` and Compose also work w
 | `MEMORY_DATABASE_URL` | `postgresql://engram:engram@127.0.0.1:5432/engram_memory` | Memories |
 | `KAFKA_BOOTSTRAP_SERVERS` | `127.0.0.1:9092` | Extract, reinforce, and dead-letter topics. Inside Compose this is `kafka:19092` |
 
-Inside Compose, each container receives `DATABASE_URL` pointed at host `postgres` and its own database. A service uses its `*_DATABASE_URL` when set, and otherwise `DATABASE_URL`. Memory jobs are not stored in Postgres. context publishes `memory.extract` and `memory.reinforce` after the chat `done` event. memory consumes them in group `engram-memory`. A job that still fails on the fifth attempt is copied to `memory.dead` and not run again. Forgetting stale memories is a periodic scan in that consumer, not a topic. See [docs/queue.md](docs/queue.md).
+Inside Compose, each container receives `DATABASE_URL` pointed at host `postgres` (container `engram-postgres`) and its own database. A service uses its `*_DATABASE_URL` when set, and otherwise `DATABASE_URL`. Other containers reach a service by its Compose service name, not by `container_name`: `chat`, `context`, `memory`, `llm-gateway`, `kafka`, `postgres`. Memory jobs are not stored in Postgres. `engram-context` publishes `memory.extract` and `memory.reinforce` after the chat `done` event. `engram-memory` consumes them in group `engram-memory` from `kafka:19092`. A job that still fails on the fifth attempt is copied to `memory.dead` and not run again. Forgetting stale memories is a periodic scan in that consumer, not a topic. See [docs/queue.md](docs/queue.md).
 
 With a key, chat and memory extraction call OpenRouter and send `HTTP-Referer: https://github.com/ZhangShenao/engram` plus `X-Title: Engram`. Without a key, the UI, memories, and context inspector still run.
 

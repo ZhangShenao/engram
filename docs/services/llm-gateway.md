@@ -2,6 +2,8 @@
 
 内部 gRPC，端口 18414。不保存会话，不访问业务库，也不连接 Kafka。一次调用的全部状态都在请求里：钉、消息、温度。会话钉存在 context 的会话行上，网关只在响应里报告实际用过的 provider 和 model，由 context 决定要不要写回去。
 
+Compose 容器名是 `engram-llm-gateway`，服务名和网络主机名都是 `llm-gateway`。context 和 memory 的 `LLM_TARGET` 写成 `llm-gateway:18414`。旧的服务名 `llm` 不再使用。
+
 ## 两种调用
 
 聊天补全是 `Complete`，服务端流。context 在组装完 prompt 之后调用它，温度 0.8。每个文本增量一条消息，流结束即这一轮的模型部分结束。

@@ -2,6 +2,8 @@
 
 记忆的唯一所有者。内部 gRPC，端口 18413。库 `engram_memory`。它也是 Kafka 消费组 `engram-memory` 的唯一成员。不要再起第二个 memory 进程去抢这一个分区：主题都是单分区，第二个成员会空转，第一个成员才处理作业。
 
+Compose 容器名是 `engram-memory`，网络主机名是 `memory`。库在 `postgres:5432` 的容器 `engram-postgres` 上，队列连 `kafka:19092`（容器名 `engram-kafka`）。模型调用的目标是 `llm-gateway:18414`。消费组名 `engram-memory` 和容器名相同，只是碰巧；组名不会跟着 `docker rename` 变。
+
 ## 拥有
 
 - 记忆行：正文、类型、槽位、salience、来源 turn、取代、删除、遗忘

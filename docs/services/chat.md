@@ -2,6 +2,8 @@
 
 浏览器和 Next.js 唯一访问的 HTTP 服务，端口 18410。库 `engram_chat`。Web 把 `/gateway/*` 代理到这里，聊天页面本身由 Next 在 18415 提供。
 
+Compose 容器名是 `engram-chat`。同一网络里的主机名是服务名 `chat`，所以 `engram-web` 的 `GATEWAY_URL` 是 `http://chat:18410`，不是 `http://engram-chat:18410`。
+
 ## 拥有
 
 - 角色卡：名称、tagline、人设、场景、示例、greeting、说话风格、boundaries、时间戳
