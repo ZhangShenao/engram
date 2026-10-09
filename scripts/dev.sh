@@ -6,7 +6,7 @@
 #                         Docker, fall back to `local`.
 #   scripts/dev.sh local  Run Postgres, the five services, and Next.js as host processes.
 #   scripts/dev.sh logs   Follow Compose logs. Extra arguments go to `docker compose logs`.
-#   scripts/dev.sh down   Stop the Compose stack. Data stays in the engram-pg volume.
+#   scripts/dev.sh down   Stop the Compose stack. Data stays in the engram-pg and engram-kafka volumes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -41,6 +41,10 @@ compose_up() {
     pg_port="$(compose_postgres_port)"
     if port_busy "$pg_port"; then
       echo "Port ${pg_port} is already in use. Stop that process, or set POSTGRES_PORT in .env to publish the Compose Postgres elsewhere." >&2
+      exit 1
+    fi
+    if port_busy 9092; then
+      echo "Port 9092 is already in use. Stop that process before starting the Compose Kafka broker." >&2
       exit 1
     fi
     for port in "${APP_PORTS[@]}"; do
@@ -89,7 +93,7 @@ run_local() {
   export CHAT_DATABASE_URL="${CHAT_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_chat}"
   export CONTEXT_DATABASE_URL="${CONTEXT_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_context}"
   export MEMORY_DATABASE_URL="${MEMORY_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_memory}"
-  export MQ_DATABASE_URL="${MQ_DATABASE_URL:-postgresql://engram:engram@127.0.0.1:${pg_port}/engram_mq}"
+  export KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}"
 
   if ! command -v uv >/dev/null 2>&1; then
     echo "uv is not installed. See https://docs.astral.sh/uv/getting-started/installation/" >&2
@@ -106,6 +110,7 @@ run_local() {
   mkdir -p logs
 
   start_postgres
+  start_kafka
 
   local port
   for port in "${APP_PORTS[@]}"; do
@@ -163,7 +168,7 @@ END
 $$;
 SQL
   local db
-  for db in engram_chat engram_context engram_memory engram_mq; do
+  for db in engram_chat engram_context engram_memory; do
     if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${db}'" | grep -q 1; then
       sudo -u postgres createdb -O engram "$db"
     fi
@@ -203,6 +208,27 @@ start_postgres() {
   echo "Waiting for local Postgres..."
   wait_postgres
   ensure_local_databases
+}
+
+start_kafka() {
+  local servers host port
+  servers="${KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}"
+  host="${servers%%,*}"
+  port="${host##*:}"
+  host="${host%:*}"
+  if [[ "$host" != "127.0.0.1" && "$host" != "localhost" ]]; then
+    return 0
+  fi
+  if port_busy "$port"; then
+    return 0
+  fi
+  if docker_ready; then
+    echo "Waiting for Kafka from docker compose..."
+    docker compose up -d --wait kafka
+    return 0
+  fi
+  echo "Kafka is not listening on ${host}:${port}. Start the Compose stack, or set KAFKA_BOOTSTRAP_SERVERS to a broker this host can reach." >&2
+  exit 1
 }
 
 cleanup() {

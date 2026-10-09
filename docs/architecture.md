@@ -4,7 +4,7 @@
 > **读者**：产品负责人与实现者
 > **运行时**：Python 3.12。chat-service 对外 HTTP，其余内部服务 gRPC。无 Kubernetes。
 
-浏览器只访问 chat-service。Web 把 `/gateway/*` 代理到它。context-service 拥有聊天记录和检查器。llm-gateway 是唯一出站到模型的进程。memory-service 拥有记忆。
+浏览器只访问 chat-service。Web 把 `/gateway/*` 代理到它。context-service 拥有聊天记录、prompt 和检查器。llm-gateway 是唯一出站到模型的进程。memory-service 拥有记忆。提取和强化通过 Kafka 异步完成，设计见 [queue.md](queue.md)。
 
 ---
 
@@ -18,13 +18,27 @@
 | llm-gateway | 18414 gRPC | 无 | OpenRouter 与脚本化 Provider、首字前的失败切换 | 不保存会话 |
 | web | 18415 | 无 | 英文 UI | 不实现业务规则 |
 
-`engram_mq` 是消息队列的库，不属于某一个业务服务。context 发布，memory 消费。
+Compose 里 `docker ps` 看到的是 `container_name`。容器互相访问时用的是服务名，不是 `container_name`。Kafka 的 `hostname` 也固定为 `kafka`，这样 KRaft 的控制器地址和内网广告地址都能解析。
 
-角色卡由 chat 在每次回合请求里交给 context。context 不回调 chat。
+| 容器名 | 服务名 / 网络主机名 | 谁连它 |
+|--------|---------------------|--------|
+| `engram-postgres` | `postgres` | 各业务库，端口 5432 |
+| `engram-kafka` | `kafka` | context、memory 用 `kafka:19092`；宿主机用 `127.0.0.1:9092` |
+| `engram-llm-gateway` | `llm-gateway` | context、memory 的 `LLM_TARGET=llm-gateway:18414` |
+| `engram-memory` | `memory` | chat、context 的 `MEMORY_TARGET=memory:18413` |
+| `engram-context` | `context` | chat 的 `CONTEXT_TARGET=context:18411` |
+| `engram-chat` | `chat` | Web 的 `GATEWAY_URL=http://chat:18410` |
+| `engram-web` | `web` | 浏览器访问宿主端口 18415 |
+
+三个 Postgres 库各属一个服务，互不共享表，也不共享连接。消息队列是单独的 Kafka broker，不属于任何一个业务库。context 发布，memory 消费。以前用于队列的 `engram_mq` 库已经不再创建。
+
+角色卡由 chat 在每次回合请求里交给 context。context 不回调 chat 取角色，避免回合路径上的反向依赖。chat 删除角色时的顺序是：先让 memory 按角色清空，再让 context 删会话，最后删自己的角色卡。中途失败会留下已经清掉的下游数据，角色卡仍在，调用方可以重试删除。
 
 ## 2. 通信
 
-同步用 gRPC，异步用 Postgres 队列（`SKIP LOCKED`）。内部服务不对浏览器暴露 HTTP。进程健康检查是各服务自己的 `Check` RPC。
+同步用 gRPC，异步用 Kafka。内部服务不对浏览器暴露 HTTP。chat 的 `/health` 是给 Compose 和本机脚本用的 HTTP 探针。context、memory、llm-gateway 的进程健康检查是各自的 `Check` RPC，不另开 HTTP 端口。
+
+gRPC 通道在进程里复用。chat 到 context 的回合流不压缩。压缩会把 SSE 攒到生成结束才交给浏览器。llm-gateway 访问 OpenRouter 时同样发送 `Accept-Encoding: identity`。
 
 | 调用 | 方式 |
 |------|------|
@@ -34,12 +48,16 @@
 | context → memory 排序、按 turn 丢弃 | 一元 RPC |
 | context → llm-gateway 补全 | 服务端流 |
 | memory → llm-gateway JSON 提取 | 一元 RPC |
-| 回合结束后的提取、被装进 prompt 的记忆强化 | 队列 `memory.extract`、`memory.reinforce` |
+| 回合结束后的提取、被装进 prompt 的记忆强化 | Kafka `memory.extract`、`memory.reinforce` |
+| 第五次仍失败的作业 | Kafka `memory.dead`，不再执行 |
 | 摘要追加 | 仍在同步路径里，context 自己写自己的库 |
+| 遗忘扫描 | memory 消费循环的空闲周期，不是一条消息 |
 
-提取失败只重试队列，不另发 SSE。`done` 的 `extractMs` 仍为空。memory 提取结束后调用 context 的 `StampExtract`，检查器快照才补上耗时。
+提取失败只在 Kafka 里重试，不另发 SSE。`done` 的 `extractMs` 仍为空。memory 提取结束后调用 context 的 `StampExtract`，检查器快照才补上耗时。发布本身失败只记日志：`done` 已经写出，不能再把这一轮改成错误事件。重试、死信、分区和至少一次的语义见 [queue.md](queue.md)。
 
 被 regenerate 替换掉的 turn 会写入 `discarded_turns`。之后才到达的提取看到这个墓碑就不再插入，因此提取不必挡在 `done` 前面。
+
+启动顺序跟着依赖走。llm-gateway 没有数据库，也没有队列。memory 要等 Postgres 和 Kafka 都健康，因为它既有记忆库，又要开始消费。context 要等 memory 和 llm-gateway，因为它在回合里同步调用排序，并在回合末尾发布作业。chat 最后等 context。Web 只等 chat 的 `/health`。本机 `scripts/dev.sh local` 用同样的顺序拉起进程，差别是 Postgres 和 Kafka 可以来自 Compose，业务进程在宿主机。
 
 ## 3. 一轮 chat
 
@@ -49,7 +67,7 @@
 4. 用会话上的 `(provider, model)` 钉调用 llm-gateway。无密钥时网关直接走脚本化 Provider，不改会话钉。
 5. 有密钥且首字尚未吐出时，网关可以按备用链整轮换一家。已经有 token 之后失败就结束这一轮，不接半句话。换成功后 context 把会话钉改成实际用的那一家。本期备用链只有 OpenRouter。
 6. 写入 assistant。有 `evictedTurns` 时追加滚动摘要。推出 `done`。
-7. 发布提取和强化消息。响应可以在发布后结束。
+7. 发布提取和强化消息。两条记录都得到 broker 确认后，这一轮的 gRPC 流结束。提取在 memory 进程里继续，不挡输入框。
 
 `regenerate` 与 `continue` 的 prompt 规则不变。替换仍是 context 里的一个事务：写入新回复并删除旧回复。成功后、`done` 之前，按旧回复 id 丢弃记忆。
 
@@ -63,7 +81,11 @@
 
 内置路径：`user.name`、`user.language`、`relationship.status`、`boundary.limit`、`promise.commitment`。
 
-排序用衰减后的 salience（半衰期 30 天），权重仍是 salience 0.45、recency 0.35、relevance 0.20。创建已超过 14 天且衰减后 salience 低于 0.2 的活跃记忆会被标成 forgotten，不再参与排序和列表。被装进 prompt 的记忆通过队列强化，salience 略增并刷新 `last_reinforced_at`。正文几乎相同的新候选不另插一行，而是强化已有行。
+排序用衰减后的 salience。衰减锚点是 `last_reinforced_at`，没有强化过则用 `created_at`。半衰期 30 天，也就是年龄每增加 30 天，有效 salience 乘 0.5。排序权重仍是有效 salience 0.45、recency 0.35、词面 relevance 0.20。recency 在 30 天时线性降到 0。relevance 是查询词和记忆正文的词面重叠，没有向量。
+
+创建已超过 14 天、且衰减后 salience 低于 0.2 的活跃记忆会被标成 forgotten，不再参与排序和列表。这条扫描由 memory 的消费循环在空闲时执行，大约每 60 秒一次空轮询之后跑一轮，不是 Kafka 主题。
+
+被装进 prompt 的记忆通过 `memory.reinforce` 强化：salience 增加 0.05，封顶 1，并刷新 `last_reinforced_at`，同时清掉 forgotten 标记。正文几乎相同的新候选不另插一行，而是强化已有行。同一槽位的新事实会取代旧行；不同槽位并存。
 
 ---
 
@@ -168,7 +190,9 @@ pytest
 
 覆盖裁剪顺序、人设保留、`evictedTurns`、记忆排序、槽位取代，以及 prompt 段落顺序。这些测试不启动进程、不需要 API 密钥。`OPENROUTER_API_KEY` 为空时走脚本化 Provider。
 
-CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑 `scripts/quality_report.py`，再构建 `web/`。质量检查包含全部 `pytest`、语句覆盖率（不低于 65%）和代码重复率（不高于 5%）。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_chat`、`engram_context`、`engram_memory`、`engram_mq`。`OPENROUTER_API_KEY` 置空。检查结束后，在对应的 pull request 上更新一条工程质量报告。不读取仓库密钥；评论使用 Actions 自带的 `GITHUB_TOKEN`。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
+CI（`.github/workflows/ci.yml`）在 pull request 和推送到 `main` 时跑 `scripts/quality_report.py`，再构建 `web/`。质量检查包含全部 `pytest`、语句覆盖率（不低于 65%）和代码重复率（不高于 5%）。工作流启动 PostgreSQL 16，用 `scripts/init-postgres.sql` 创建 `engram_chat`、`engram_context`、`engram_memory`，并启动单节点 Kafka 4.2.2。队列测试连 `127.0.0.1:9092`。`OPENROUTER_API_KEY` 置空。检查结束后，在对应的 pull request 上更新一条工程质量报告。不读取仓库密钥；评论使用 Actions 自带的 `GITHUB_TOKEN`。新的提交会取消同一 ref 上尚未结束的运行。`main` 禁止直接推送、强推和删除，没有旁路。变更必须走 pull request，并且名为 `ci` 的检查通过后才能合并，分支还要和 `main` 保持同步。不要提交 `.env`。
+
+队列的集成测试在 `packages/engram_queue/tests`。它们检查领取互斥、退避后再次投递、第五次失败进入 `memory.dead`，以及坏记录被跳过。其余测试不启动 Kafka 客户端。没有密钥时，模型调用走脚本化 Provider，记忆提取走确定性提取器。
 
 ---
 

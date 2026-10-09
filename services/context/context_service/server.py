@@ -30,7 +30,7 @@ from context_service.transcript import (
 )
 from engram_contracts.models import CharacterCard
 from engram_contracts.rpc import engram_pb2, engram_pb2_grpc
-from engram_queue.queue import init_db as init_queue
+from engram_queue.queue import ensure_topics
 
 logger = logging.getLogger("engram.context")
 if not logger.handlers:
@@ -126,7 +126,7 @@ class ContextService(engram_pb2_grpc.ContextServicer):
 async def serve() -> None:
     init_transcript()
     init_inspections()
-    init_queue()
+    ensure_topics()
     memory_target = os.environ.get("MEMORY_TARGET", "127.0.0.1:18413")
     llm_target = os.environ.get("LLM_TARGET", "127.0.0.1:18414")
     memory_channel = grpc.aio.insecure_channel(memory_target)

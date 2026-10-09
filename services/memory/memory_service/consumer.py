@@ -6,12 +6,10 @@ import logging
 import grpc
 
 from engram_contracts.rpc import engram_pb2, engram_pb2_grpc
-from engram_queue.queue import ack, claim, nack
+from engram_queue.queue import TOPICS, ack, claim, ensure_topics, nack
 from memory_service.store import extract_and_store, forget_stale, reinforce_memories
 
 logger = logging.getLogger("engram.memory.queue")
-
-TOPICS = ("memory.extract", "memory.reinforce")
 
 
 async def _stamp(inspection_id: str, extract_ms: int) -> None:
@@ -68,9 +66,15 @@ async def consume_once() -> bool:
 
 
 async def consume_forever(stop: asyncio.Event | None = None) -> None:
+    await asyncio.to_thread(ensure_topics)
     idle_rounds = 0
     while stop is None or not stop.is_set():
-        worked = await consume_once()
+        try:
+            worked = await consume_once()
+        except Exception:
+            logger.exception("queue poll failed")
+            await asyncio.sleep(1)
+            continue
         if worked:
             idle_rounds = 0
             continue

@@ -34,7 +34,7 @@ git worktree remove ../engram-<short-name>
 ## 服务边界
 
 - `chat` 拥有角色卡和对外 HTTP（CORS、请求日志、种子引导）。`context` 拥有会话、消息、滚动摘要、裁剪、prompt、检查器快照。`memory` 拥有提取、排序、层级槽位、衰减、遗忘、冲突解决和用户编辑。`llm-gateway` 拥有模型接入、会话钉和首字前的失败切换。
-- 浏览器只访问 chat-service 的 HTTP。内部服务走 gRPC。记忆提取、强化和遗忘走 Postgres 消息队列。每个服务有自己的 Postgres 库：`engram_chat`、`engram_context`、`engram_memory`、`engram_mq`。它们在同一台本地 Postgres 上，互不共享表，也不共享数据库连接。
+- 浏览器只访问 chat-service 的 HTTP。内部服务走 gRPC。记忆提取和强化走 Kafka，主题是 `memory.extract` 和 `memory.reinforce`，消费组是 `engram-memory`。第五次仍失败的作业写入 `memory.dead`，不再执行。遗忘不是队列消息，而是 memory 消费循环在空闲时做的扫描。每个服务有自己的 Postgres 库：`engram_chat`、`engram_context`、`engram_memory`。它们在同一台本地 Postgres 上，互不共享表，也不共享数据库连接。不要再创建 `engram_mq`。队列的监听、记录格式和至少一次语义写在 `docs/queue.md`。宿主机和 CI 用 `KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9092`，Compose 网络里的 context 和 memory 用 `kafka:19092`。
 - `packages/engram_contracts` 只放 Pydantic 形状和共享常量。不要把 prompt 或排序算法放进去。
 
 ## Prompt 放在哪里
@@ -113,7 +113,7 @@ CI 的 `ci` 任务先跑同一套 pre-commit 钩子，质量报告里也有一�
 ./scripts/dev.sh
 ```
 
-有 Docker 时它用 Docker Compose 构建并启动整套服务，等所有容器健康后返回；`./scripts/dev.sh logs` 看日志，`./scripts/dev.sh down` 停止。没有 Docker，或用 `./scripts/dev.sh local`，则在本机进程里跑，这时需要先装好 uv，脚本会执行 `uv sync --frozen`。本机 5432 已被占用时，设置 `POSTGRES_PORT` 换一个宿主端口。
+有 Docker 时它用 Docker Compose 构建并启动整套服务，等所有容器健康后返回；`./scripts/dev.sh logs` 看日志，`./scripts/dev.sh down` 停止。容器名是 `engram-postgres`、`engram-kafka`、`engram-llm-gateway`、`engram-memory`、`engram-context`、`engram-chat`、`engram-web`。容器之间用服务名通信：`postgres`、`kafka`、`llm-gateway`、`memory`、`context`、`chat`。不要把 `LLM_TARGET` 写成 `llm:18414` 或 `engram-llm-gateway:18414`。没有 Docker，或用 `./scripts/dev.sh local`，则在本机进程里跑，这时需要先装好 uv，脚本会执行 `uv sync --frozen`。本机 5432 已被占用时，设置 `POSTGRES_PORT` 换一个宿主端口。9092 要留给 Kafka。
 
 Web 在 http://127.0.0.1:18415。不要占用 3000、5173、8080 或 43123。
 

@@ -15,7 +15,7 @@ for _parent in Path(__file__).resolve().parents:
 
 from engram_contracts.models import MEMORY_TYPES
 from engram_contracts.rpc import engram_pb2, engram_pb2_grpc
-from engram_queue.queue import init_db as init_queue
+from engram_queue.queue import ensure_topics
 from memory_service.consumer import consume_forever
 from memory_service.llm_client import aclose
 from memory_service.store import (
@@ -91,7 +91,7 @@ class MemoryService(engram_pb2_grpc.MemoryServicer):
 
 async def serve() -> None:
     init_db()
-    init_queue()
+    ensure_topics()
     port = os.environ.get("MEMORY_PORT", "18413")
     server = grpc.aio.server()
     engram_pb2_grpc.add_MemoryServicer_to_server(MemoryService(), server)

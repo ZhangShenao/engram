@@ -4,7 +4,7 @@
 
 ![模型在系统里的位置](images/09-engram-place.jpg)
 
-训练样本要长得和 Harness 发给模型的 `messages` 一样。`assemble_context` 把人设、输出形态、记忆、摘要、re-anchor 和生成提示收成一条 system，后面才是 user 和 assistant 回合。
+训练样本要长得和 context-service 发给模型的 `messages` 一样。`assemble_context` 把人设、输出形态、记忆、摘要、re-anchor 和生成提示收成一条 system，后面才是 user 和 assistant 回合。
 
 ## 一条样本
 
@@ -23,7 +23,7 @@
 ]}
 ```
 
-mlx-lm 会套用模型自己的聊天模板。Qwen2.5 会变成 `<|im_start|>system` 这样的分段，再接内容，再接 `<|im_end|>`。模板 token 也进序列，也进前向。不要自己再包一层特殊符号，除非你改用 `text` 格式并完全自己拼。两套模板混在一个文件里，模型会把分段符本身当成要学习的模式，线上 Harness 又不用那套分段，学到的边界对不上。
+mlx-lm 会套用模型自己的聊天模板。Qwen2.5 会变成 `<|im_start|>system` 这样的分段，再接内容，再接 `<|im_end|>`。模板 token 也进序列，也进前向。不要自己再包一层特殊符号，除非你改用 `text` 格式并完全自己拼。两套模板混在一个文件里，模型会把分段符本身当成要学习的模式，线上 context-service 又不用那套分段，学到的边界对不上。
 
 一条样本在损失里真正被推高的，只有末尾回复的 token。system 里的角色卡是条件。条件如果和线上不一致，模型学到的是「在另一套说明文字后面接这种回复」。这就是协变量偏移：输入分布变了，条件概率还是训练时的那一个。所以记忆标题、re-anchor 的英文句子要和 `builder.py`、`stability.py` 逐字相同，而不是「意思差不多」。
 
